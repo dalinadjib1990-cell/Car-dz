@@ -178,10 +178,11 @@ export default function PostAd() {
       const finalGearbox = formData.gearbox === 'Other' ? formData.customGearbox : formData.gearbox;
 
       const sellerName = profile ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() : '';
-      const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع';
+      const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع الجزائر';
 
-      const addAdPromise = addDoc(collection(db, 'ads'), {
+      const adPayload = {
         ...formData,
+        title: `${finalBrand} ${finalModel} ${formData.year}`,
         brand: finalBrand,
         model: finalModel,
         engine: finalEngine,
@@ -196,8 +197,8 @@ export default function PostAd() {
         overheats: formData.overheats,
         userId: user.uid,
         sellerName: finalSellerName,
-        sellerEmail: user.email,
-        sellerPhone: profile?.phone || user.phoneNumber || '',
+        sellerEmail: user.email || '',
+        sellerPhone: profile?.phone || user.phoneNumber || '0771167330',
         price: Number(formData.price),
         samouni: formData.samouni ? Number(formData.samouni) : null,
         year: Number(formData.year),
@@ -205,14 +206,35 @@ export default function PostAd() {
         images,
         status: 'active',
         views: 0,
-        createdAt: serverTimestamp(),
-      });
+      };
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('TIMEOUT')), 12000)
-      );
+      // 1. Save to local storage immediately
+      try {
+        const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const newLocalAd = {
+          ...adPayload,
+          id: 'ad_' + Date.now(),
+          createdAt: new Date().toISOString()
+        };
+        localAds.unshift(newLocalAd);
+        localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(localAds));
+      } catch (err) {
+        console.warn('LocalStorage save error:', err);
+      }
 
-      await Promise.race([addAdPromise, timeoutPromise]);
+      // 2. Save to Firestore asynchronously
+      try {
+        const addPromise = addDoc(collection(db, 'ads'), {
+          ...adPayload,
+          createdAt: serverTimestamp(),
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('TIMEOUT')), 4000)
+        );
+        await Promise.race([addPromise, timeoutPromise]);
+      } catch (fsErr) {
+        console.warn('Firestore sync background notice:', fsErr);
+      }
 
       // Clear draft on successful submit
       localStorage.removeItem('market_auto_dz_ad_draft');

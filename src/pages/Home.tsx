@@ -14,12 +14,36 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'ads'), orderBy('createdAt', 'desc'), limit(8));
+    const q = query(collection(db, 'ads'), orderBy('createdAt', 'desc'), limit(12));
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 2000);
+
     const unsubscribe = onSnapshot(q, (snap) => {
-      setLatestAds(snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad)));
+      clearTimeout(timer);
+      const fsAds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
+      try {
+        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const fsIds = new Set(fsAds.map(a => a.id));
+        const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
+        setLatestAds([...filteredLocal, ...fsAds]);
+      } catch (_) {
+        setLatestAds(fsAds);
+      }
+      setLoading(false);
+    }, (err) => {
+      console.warn('Firestore ads stream notice:', err);
+      try {
+        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        setLatestAds(localAds);
+      } catch (_) {}
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   return (

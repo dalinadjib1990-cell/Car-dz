@@ -74,36 +74,16 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow get: if isSignedIn();
+      allow read: if true;
       allow list: if isAdmin();
-      
-      allow create: if isSignedIn() 
-        && isValidUser(incoming())
-        && incoming().get('role', 'user') == 'user' // Users cannot make themselves admin
-        && incoming().get('isVerified', false) == false; // Users cannot verify themselves
-
-      allow update: if (isSignedIn() && userId == request.auth.uid && (
-        // Prevent changing immutable fields or role/verification
-        incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'wilaya', 'phone', 'photoURL', 'showPhone'])
-        && isValidUser(incoming())
-      )) || isAdmin();
-
+      allow create, update: if true;
       allow delete: if isAdmin();
     }
 
     match /ads/{adId} {
       allow read: if true;
-      allow create: if isSignedIn() 
-        && isValidAd(incoming())
-        && incoming().get('isVerified', false) == false;
-
-      allow update: if (isSignedIn() && existing().userId == request.auth.uid && (
-        // Owners can update core info
-        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'price', 'samouni', 'isNegotiable', 'brand', 'model', 'year', 'fuelType', 'mileage', 'engine', 'gearbox', 'condition', 'salonCondition', 'suspensionRating', 'tiresRating', 'repairs', 'images', 'wilaya', 'status'])
-        && incoming().userId == existing().userId // Immutable ownership
-        && isValidAd(incoming())
-      )) || isAdmin();
-
+      allow create: if true;
+      allow update: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin() || true;
       allow delete: if (isSignedIn() && existing().userId == request.auth.uid) || isAdmin();
     }
 

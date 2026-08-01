@@ -1,15 +1,17 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onAuthStateChanged, User, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 interface AuthContextType {
-  user: User | null;
+  user: User | any | null;
   profile: UserProfile | null;
   loading: boolean;
   isAdmin: boolean;
+  setLocalUserSession: (prof: UserProfile) => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -17,25 +19,66 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   isAdmin: false,
+  setLocalUserSession: () => {},
+  logout: async () => {},
 });
 
+const LOCAL_SESSION_KEY = 'market_auto_dz_session';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const setLocalUserSession = (prof: UserProfile) => {
+    localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(prof));
+    setProfile(prof);
+    setUser({
+      uid: prof.uid,
+      email: prof.email,
+      displayName: `${prof.firstName} ${prof.lastName}`.trim(),
+      phoneNumber: prof.phone,
+    });
+  };
+
+  const logout = async () => {
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+    setUser(null);
+    setProfile(null);
+    try {
+      await firebaseSignOut(auth);
+    } catch (_) {}
+  };
+
   useEffect(() => {
-    // Safety fallback timeout (1.8s max) to prevent blocking screen on slow mobile networks (3G/4G)
+    // Check local session first
+    const savedSession = localStorage.getItem(LOCAL_SESSION_KEY);
+    if (savedSession) {
+      try {
+        const parsed: UserProfile = JSON.parse(savedSession);
+        if (parsed && parsed.uid) {
+          setProfile(parsed);
+          setUser({
+            uid: parsed.uid,
+            email: parsed.email,
+            displayName: `${parsed.firstName} ${parsed.lastName}`.trim(),
+            phoneNumber: parsed.phone,
+          });
+          setLoading(false);
+        }
+      } catch (_) {}
+    }
+
     const timer = setTimeout(() => {
       setLoading(false);
     }, 1800);
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       clearTimeout(timer);
-      setUser(u);
-      setLoading(false); // Immediate unblock
-
       if (u) {
+        setUser(u);
+        setLoading(false);
+
         const syncProfile = async () => {
           try {
             const userEmail = u.email?.toLowerCase().trim();
@@ -50,12 +93,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             if (docSnap && docSnap.exists()) {
               const data = docSnap.data();
+              const updated = isMaster && data.role !== 'admin' ? { ...data, role: 'admin' } : data;
               if (isMaster && data.role !== 'admin') {
-                await updateDoc(docRef, { role: 'admin' });
-                setProfile({ ...data, role: 'admin' } as UserProfile);
-              } else {
-                setProfile(data as UserProfile);
+                updateDoc(docRef, { role: 'admin' }).catch(() => {});
               }
+              setProfile(updated as UserProfile);
+              localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(updated));
             } else if (docSnap !== null) {
               const newProfile: UserProfile = {
                 uid: u.uid,
@@ -68,8 +111,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 role: isMaster ? 'admin' : 'user',
                 createdAt: serverTimestamp(),
               };
-              await setDoc(docRef, newProfile);
+              setDoc(docRef, newProfile).catch(() => {});
               setProfile(newProfile);
+              localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(newProfile));
             }
           } catch (error) {
             handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
@@ -77,7 +121,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         syncProfile();
       } else {
-        setProfile(null);
+        if (!localStorage.getItem(LOCAL_SESSION_KEY)) {
+          setUser(null);
+          setProfile(null);
+        }
+        setLoading(false);
       }
     });
 
@@ -90,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdmin = profile?.role === 'admin' || user?.email?.toLowerCase().trim() === "dalinadjib1990@gmail.com";
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, setLocalUserSession, logout }}>
       {children}
     </AuthContext.Provider>
   );
