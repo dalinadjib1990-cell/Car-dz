@@ -5,11 +5,11 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { Chat, Message } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
-import { Send, User, Search, MoreVertical, Phone, MessageSquare, Volume2, VolumeX, ArrowRight, CheckCircle2, Image as ImageIcon, Trash2, Edit2, X, Loader2, Bot, AlertTriangle } from 'lucide-react';
+import { Send, User, Search, MoreVertical, Phone, MessageSquare, Volume2, VolumeX, ArrowRight, CheckCircle2, Image as ImageIcon, Trash2, Edit2, X, Loader2, Bot, AlertTriangle, Eye } from 'lucide-react';
 import { deleteSingleMessage, deleteFullChat } from '../services/chatService';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 
 import rehypeRaw from 'rehype-raw';
@@ -75,10 +75,13 @@ function AIMessageContent({ text }: { text: string }) {
 
 export default function Messages({ isWidget = false, initialChatId }: { isWidget?: boolean, initialChatId?: string | null }) {
   const { user, profile } = useAuth();
+  const [searchParams] = useSearchParams();
+  const urlChatId = searchParams.get('chatId');
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [activeAd, setActiveAd] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +93,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
   const [msgToDelete, setMsgToDelete] = useState<Message | null>(null);
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
   const touchTimerRef = React.useRef<any>(null);
+  const typingTimeoutRef = React.useRef<any>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -226,13 +230,33 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
   }, [user, soundEnabled]);
 
   useEffect(() => {
-    if (initialChatId && chats.length > 0) {
-      const target = chats.find(c => c.id === initialChatId);
+    const targetId = urlChatId || initialChatId;
+    if (targetId && chats.length > 0) {
+      const target = chats.find(c => c.id === targetId);
       if (target && target.id !== activeChat?.id) {
         setActiveChat(target);
       }
     }
-  }, [initialChatId, chats]);
+  }, [urlChatId, initialChatId, chats]);
+
+  useEffect(() => {
+    if (!activeChat?.id || !user?.uid) {
+      setIsOtherTyping(false);
+      return;
+    }
+    const unsubChatDoc = onSnapshot(doc(db, 'chats', activeChat.id), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const otherUid = activeChat.participants?.find(id => id !== user.uid);
+        if (otherUid && data.typing && data.typing[otherUid]) {
+          setIsOtherTyping(true);
+        } else {
+          setIsOtherTyping(false);
+        }
+      }
+    });
+    return () => unsubChatDoc();
+  }, [activeChat?.id, user?.uid]);
 
   useEffect(() => {
     if (!activeChat) {
@@ -282,6 +306,21 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
     }
   }, [activeChat, user, messages.length]);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setNewMessage(val);
+    
+    if (!activeChat || !user) return;
+    
+    const chatRef = doc(db, 'chats', activeChat.id);
+    setDoc(chatRef, { [`typing.${user.uid}`]: true }, { merge: true }).catch(console.error);
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      setDoc(chatRef, { [`typing.${user.uid}`]: false }, { merge: true }).catch(console.error);
+    }, 2500);
+  };
+
   const handleSendMessage = async (e?: React.FormEvent, textOverride?: string, imageUrl?: string) => {
     if (e) e.preventDefault();
     const textToSend = textOverride || newMessage;
@@ -289,6 +328,10 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
     try {
       const otherUid = activeChat.participants?.find(id => id !== user.uid);
       
+      // Clear typing status on send
+      const chatRef = doc(db, 'chats', activeChat.id);
+      setDoc(chatRef, { [`typing.${user.uid}`]: false }, { merge: true }).catch(console.error);
+
       await addDoc(collection(db, 'messages'), {
         chatId: activeChat.id,
         senderId: user.uid,
@@ -299,7 +342,6 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
       });
       
       // Update chat metadata and increment unread count for other user
-      const chatRef = doc(db, 'chats', activeChat.id);
       const updateData: any = {
         lastMessage: imageUrl ? '📷 صورة' : textToSend,
         lastSenderId: user.uid,
@@ -563,7 +605,24 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                         {chat.adSamouni && <span className="text-[9px] text-red-500 font-bold">سوموني: {chat.adSamouni.toLocaleString()}</span>}
                       </div>
                     </div>
-                    <p className="text-xs text-white/40 truncate mt-1">{chat.lastMessage || 'لا توجد رسائل بعد'}</p>
+                    <p className="text-xs text-white/40 truncate mt-1">
+                      {(() => {
+                        const otherUid = chat.participants?.find(id => id !== user.uid);
+                        if (otherUid && (chat as any).typing?.[otherUid]) {
+                          return (
+                            <span className="text-emerald-400 font-bold flex items-center gap-1 animate-pulse">
+                              <span>يكتب الآن...</span>
+                              <span className="inline-flex items-center gap-0.5">
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                                <span className="w-1 h-1 bg-emerald-400 rounded-full animate-bounce"></span>
+                              </span>
+                            </span>
+                          );
+                        }
+                        return chat.lastMessage || 'لا توجد رسائل بعد';
+                      })()}
+                    </p>
                   </div>
                 </button>
                 <button
@@ -818,14 +877,35 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                       </div>
                       
                       {isMe && (
-                        <div className="text-[11px] text-white/40 font-medium flex items-center gap-1.5 pr-1">
-                          <CheckCircle2 size={12} className={cn(msg.read ? "text-brand-green" : "text-white/30")} />
-                          {msg.read ? 'قرأ' : 'أُرسل'}
+                        <div className="text-[11px] flex items-center gap-1.5 pr-1 mt-0.5">
+                          {msg.read ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full shadow-sm animate-in fade-in duration-300">
+                              <Eye size={12} className="text-emerald-400" />
+                              <span>Vu</span>
+                              <span className="text-xs">👀</span>
+                            </span>
+                          ) : (
+                            <span className="text-white/40 font-medium flex items-center gap-1 text-[10px]">
+                              <CheckCircle2 size={12} className="text-white/30" />
+                              <span>أُرسل</span>
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
                   </div>
                 )})}
+                {isOtherTyping && (
+                  <div className="flex items-center gap-2.5 my-3 px-4 py-2 bg-[#18181b] border border-emerald-500/30 rounded-2xl w-fit text-xs text-emerald-400 font-bold shadow-lg shadow-emerald-500/10 animate-in fade-in zoom-in-95 duration-200">
+                    <Eye size={14} className="text-emerald-400 animate-pulse" />
+                    <span>الطرف الآخر يكتب الآن...</span>
+                    <div className="inline-flex items-center gap-1 mr-1">
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:-0.3s] shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:-0.15s] shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -854,7 +934,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                     type="text"
                     placeholder="اكتب رسالتك..."
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
+                    onChange={handleInputChange}
                     className="w-full bg-white/5 border border-white/10 rounded-xl md:rounded-2xl py-2 md:py-3 px-4 md:px-6 text-base outline-none focus:border-brand-green/50 focus:bg-white/10 transition-all"
                     dir="auto"
                   />

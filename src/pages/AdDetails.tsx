@@ -200,24 +200,47 @@ export default function AdDetails() {
     }
   };
 
+  const handleShare = async () => {
+    const shareData = {
+      title: ad?.title || 'إعلان سيارة على مـاركـت أوتـو DZ',
+      text: `شاهد إعلان ${ad?.title} بسعر ${ad?.price?.toLocaleString()} دج على منصة ماركت أوتو DZ`,
+      url: window.location.href,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(window.location.href);
+        toast.success('تم نسخ رابط الإعلان بنجاح!');
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          toast.success('تم نسخ رابط الإعلان بنجاح!');
+        } catch (_) {
+          toast.error('تعذر مشاركة الإعلان');
+        }
+      }
+    }
+  };
+
   const startChat = async () => {
-    if (!ad || !user) {
+    if (!user) {
       toast.error('يرجى تسجيل الدخول للمراسلة');
       navigate('/login');
       return;
     }
-    if (!ad || !ad.userId) {
-      console.log('Ad data missing or userId missing:', ad);
-      toast.error('بيانات البائع غير مكتملة');
-      return;
-    }
+    if (!ad) return;
 
-    if (user.uid === ad.userId) {
+    const targetSellerId = ad.userId || (ad as any).sellerId || ('seller_' + (ad.id || 'default'));
+
+    if (user.uid === targetSellerId) {
       toast.error('لا يمكنك مراسلة نفسك');
       return;
     }
 
-    console.log('Starting chat. Current User:', user.uid, 'Ad Owner:', ad.userId);
+    console.log('Starting chat. Current User:', user.uid, 'Ad Owner:', targetSellerId);
     
     try {
       let existingChatDoc: any = null;
@@ -229,7 +252,7 @@ export default function AdDetails() {
         const chatSnap = await getDocs(chatQuery);
         existingChatDoc = chatSnap.docs.find(doc => {
           const data = doc.data();
-          return data.adId === id && data.participants?.includes(ad.userId);
+          return data.adId === id && data.participants?.includes(targetSellerId);
         });
       } catch (e) {
         console.warn('Firestore chats query fallback:', e);
@@ -247,7 +270,7 @@ export default function AdDetails() {
 
         const finalBuyerName = getCleanName(profile, user, 'مشتري');
         const chatData = {
-          participants: [user.uid, ad.userId],
+          participants: [user.uid, targetSellerId],
           adId: id,
           adTitle: ad.title,
           adPrice: ad.price,
@@ -255,7 +278,7 @@ export default function AdDetails() {
           adWilaya: ad.wilaya,
           adImage: ad.images[0] || null,
           buyerId: user.uid,
-          sellerId: ad.userId,
+          sellerId: targetSellerId,
           buyerName: finalBuyerName,
           sellerName: ad.sellerName || 'بائع',
           buyerEmail: user.email || '',
@@ -264,7 +287,7 @@ export default function AdDetails() {
           lastMessage: 'هل السيارة لا تزال متوفرة؟',
           lastSenderId: user.uid,
           unreadCount: {
-            [ad.userId]: 1
+            [targetSellerId]: 1
           }
         };
 
@@ -280,9 +303,10 @@ export default function AdDetails() {
             senderId: user.uid,
             text: 'هل السيارة لا تزال متوفرة؟',
             createdAt: serverTimestamp(),
+            read: false,
           });
         } catch (fsErr) {
-          console.warn('Firestore chat write notice, using local chatId:', fsErr);
+           console.warn('Firestore chat write notice, using local chatId:', fsErr);
           chatId = 'chat_' + Date.now();
         }
 
@@ -292,6 +316,7 @@ export default function AdDetails() {
       }
       
       window.dispatchEvent(new CustomEvent('open-chat-bubble', { detail: { chatId } }));
+      navigate(`/messages?chatId=${chatId}`);
     } catch (error: any) {
       console.error('Start Chat Error:', error);
       toast.error('حدث خطأ أثناء فتح المحادثة');
@@ -843,7 +868,7 @@ export default function AdDetails() {
                 <Heart size={18} />
                 حفظ
               </button>
-              <button className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 transition-all">
+              <button onClick={handleShare} className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center gap-2 transition-all">
                 <Share2 size={18} />
                 مشاركة
               </button>
