@@ -16,24 +16,33 @@ import rehypeRaw from 'rehype-raw';
 
 const NOTIFICATION_SOUND = 'https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3';
 
+function cleanMessageText(rawText: string): string {
+  if (!rawText) return '';
+  return rawText
+    .replace(/style=["']color:\s*>\s*/gi, 'style="color: ')
+    .replace(/color:\s*>\s*#/gi, 'color: #')
+    .replace(/color:\s*>/gi, 'color:')
+    .replace(/<span style="color:>\s*/gi, '<span style="color: ');
+}
+
 function AIMessageContent({ text }: { text: string }) {
-  let displayText = text || '';
+  let displayText = cleanMessageText(text || '');
   let chartData: any = null;
 
-  const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+  const jsonMatch = displayText.match(/```json\n([\s\S]*?)\n```/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[1]);
       if (parsed.repairCosts) {
         chartData = parsed.repairCosts;
       }
-      displayText = text.replace(jsonMatch[0], '');
+      displayText = displayText.replace(jsonMatch[0], '');
     } catch (e) {}
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="markdown-body text-white/90 leading-relaxed text-sm">
+      <div className="markdown-body text-white/95 leading-relaxed text-sm md:text-base font-medium">
         <Markdown rehypePlugins={[rehypeRaw]}>{displayText}</Markdown>
       </div>
       {chartData && (
@@ -923,7 +932,35 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                         }
                         const data = await response.json();
                         
-                        await handleSendMessage(undefined, data.reply);
+                        const aiMsgObj: Message = {
+                          id: 'ai_' + Date.now(),
+                          chatId: activeChat.id,
+                          senderId: 'AI_EXPERT',
+                          text: data.reply,
+                          createdAt: new Date().toISOString(),
+                          read: false,
+                        };
+
+                        setMessages(prev => [...prev, aiMsgObj]);
+
+                        try {
+                          const localKey = `market_auto_dz_local_msgs_${activeChat.id}`;
+                          const rawMsgs = localStorage.getItem(localKey) || '[]';
+                          const parsedMsgs = JSON.parse(rawMsgs);
+                          parsedMsgs.push(aiMsgObj);
+                          localStorage.setItem(localKey, JSON.stringify(parsedMsgs));
+                        } catch (e) {}
+
+                        try {
+                          await addDoc(collection(db, 'messages'), {
+                            chatId: activeChat.id,
+                            senderId: 'AI_EXPERT',
+                            text: data.reply,
+                            createdAt: serverTimestamp(),
+                            read: false,
+                          });
+                        } catch (e) {}
+
                         toast.success('تم إرسال رأي الخبير بنجاح', { id: loadingToast });
                       } catch (error: any) {
                         console.error(error);
@@ -1036,15 +1073,27 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                       <div className={cn(
                         "relative shadow-sm whitespace-pre-wrap leading-relaxed w-fit break-words cursor-pointer",
                         isAI 
-                           ? "bg-[#18181b] text-white rounded-2xl border border-white/10 w-full p-4 md:p-5 shadow-xl" 
+                           ? "bg-[#12141a] text-white rounded-2xl border border-emerald-500/30 w-full p-4 md:p-6 shadow-2xl shadow-emerald-950/20 ring-1 ring-emerald-500/10" 
                           : (isMe
                             ? "bg-brand-green text-white rounded-[18px] rounded-tr-[4px] px-4 py-2.5 text-[15px]" 
                             : "bg-[#27272a] text-gray-100 rounded-[18px] rounded-tl-[4px] border border-white/5 px-4 py-2.5 text-[15px]")
                       )}>
                         {isAI && (
-                          <div className="flex items-center gap-2 mb-3 text-brand-green font-bold border-b border-white/10 pb-2">
-                            <Bot size={16} />
-                            <span>الخبير الآلي (Market Auto DZ)</span>
+                          <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-sm">
+                                <Bot size={18} className="animate-pulse" />
+                              </div>
+                              <div>
+                                <h4 className="font-extrabold text-sm md:text-base bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
+                                  الخبير الآلي (Market Auto DZ)
+                                </h4>
+                                <p className="text-[10px] text-white/40">تحليل ذكي ومحايد لسوق السيارات</p>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              استشارة خبير
+                            </span>
                           </div>
                         )}
                         {editingMessageId === msg.id ? (
@@ -1071,7 +1120,15 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                             {isAI ? (
                               <AIMessageContent text={msg.text} />
                             ) : (
-                              <div className={cn(msg.deleted && "italic text-white/40", "m-0")}>{msg.text}</div>
+                              <div className={cn(msg.deleted && "italic text-white/40", "m-0")}>
+                                {msg.text?.includes('<span') || msg.text?.includes('style=') ? (
+                                  <div className="markdown-body text-current leading-relaxed">
+                                    <Markdown rehypePlugins={[rehypeRaw]}>{cleanMessageText(msg.text)}</Markdown>
+                                  </div>
+                                ) : (
+                                  msg.text
+                                )}
+                              </div>
                             )}
                             {msg.edited && !msg.deleted && <span className="text-[10px] text-white/40 block mt-1.5 opacity-70">(معدلة)</span>}
                           </>

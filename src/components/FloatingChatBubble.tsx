@@ -8,7 +8,17 @@ import { useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import Messages from '../pages/Messages';
 import Markdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
 import { toast } from 'sonner';
+
+function cleanMessageText(rawText: string): string {
+  if (!rawText) return '';
+  return rawText
+    .replace(/style=["']color:\s*>\s*/gi, 'style="color: ')
+    .replace(/color:\s*>\s*#/gi, 'color: #')
+    .replace(/color:\s*>/gi, 'color:')
+    .replace(/<span style="color:>\s*/gi, '<span style="color: ');
+}
 
 interface AIMessage {
   id: string;
@@ -234,8 +244,8 @@ export default function FloatingChatBubble() {
                           )}
                         >
                           {msg.sender === 'bot' ? (
-                            <div className="prose prose-invert max-w-none text-xs md:text-sm">
-                              <Markdown>{msg.text}</Markdown>
+                            <div className="markdown-body text-white/95 leading-relaxed text-xs md:text-sm">
+                              <Markdown rehypePlugins={[rehypeRaw]}>{cleanMessageText(msg.text)}</Markdown>
                             </div>
                           ) : (
                             <p>{msg.text}</p>

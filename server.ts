@@ -39,6 +39,15 @@ async function startServer() {
     return keys;
   };
 
+  function cleanAIReply(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/style=["']color:\s*>\s*/gi, 'style="color: ')
+      .replace(/color:\s*>\s*#/gi, 'color: #')
+      .replace(/color:\s*>/gi, 'color:')
+      .replace(/<span style="color:>\s*/gi, '<span style="color: ');
+  }
+
   // API Route for AI Car Assessment
   app.post("/api/gemini/assess-car", async (req, res) => {
     try {
@@ -52,7 +61,7 @@ async function startServer() {
       ملاحظة هامة جداً: في الجزائر، غالباً ما يختصر الناس الأصفار في الأسعار. فمثلاً إذا كتب شخص "77" فهو يقصد غالباً "77 مليون سنتيم" (770,000 دج)، وإذا كتب "120" فهو يقصد "120 مليون سنتيم". خذ هذا بعين الاعتبار في تحليلك للسعر.
 
       يرجى تنظيم إجابتك لتكون واضحة باستخدام تنسيق Markdown.
-      هام جداً بشأن التلوين: استخدم وسوم HTML لتلوين النصوص والأشياء التي تذكرها:
+      هام جداً بشأن التلوين: استخدم وسوم HTML سليمة تماماً لتلوين النصوص والأشياء التي تذكرها (تأكد من إغلاق الوسوم وعدم إضافة أي رموز > زائدة داخل الخاصية style):
       - الأشياء الجيدة والممتازة لونها بالأخضر هكذا: <span style="color: #4ade80">النص هنا</span>
       - الأشياء المتوسطة والمقبولة لونها بالبرتقالي هكذا: <span style="color: #f97316">النص هنا</span>
       - الأشياء السيئة والسلبية (أو المصاريف الكبيرة) لونها بالأحمر هكذا: <span style="color: #ef4444">النص هنا</span>
@@ -159,7 +168,8 @@ ${userMessage}
               });
             }
 
-            const replyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            const rawReplyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            const replyText = cleanAIReply(rawReplyText);
             if (replyText) {
               return res.json({ reply: replyText });
             }
@@ -246,7 +256,8 @@ ${userMessage}
               });
             }
 
-            const replyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            const rawReplyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            const replyText = cleanAIReply(rawReplyText);
             if (replyText) {
               return res.json({ reply: replyText });
             }

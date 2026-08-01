@@ -439,6 +439,12 @@ export default function AdDetails() {
   let assessmentChartData: any = null;
 
   if (aiAssessmentResult) {
+    displayAssessmentText = aiAssessmentResult
+      .replace(/style=["']color:\s*>\s*/gi, 'style="color: ')
+      .replace(/color:\s*>\s*#/gi, 'color: #')
+      .replace(/color:\s*>/gi, 'color:')
+      .replace(/<span style="color:>\s*/gi, '<span style="color: ');
+
     const jsonMatch = aiAssessmentResult.match(/```json\n([\s\S]*?)\n```/);
     if (jsonMatch) {
       try {
@@ -446,7 +452,7 @@ export default function AdDetails() {
         if (parsed.repairCosts) {
           assessmentChartData = parsed.repairCosts;
         }
-        displayAssessmentText = aiAssessmentResult.replace(jsonMatch[0], '');
+        displayAssessmentText = displayAssessmentText.replace(jsonMatch[0], '');
       } catch (e) {
         console.error("Failed to parse chart data", e);
       }
