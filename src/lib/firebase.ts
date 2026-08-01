@@ -20,9 +20,7 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
 // Use default database if dbId is empty or default, otherwise initialize custom database ID
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
-}, (dbId && dbId !== '(default)' && dbId.trim() !== '') ? dbId : '(default)');
+export const db = initializeFirestore(app, {}, (dbId && dbId !== '(default)' && dbId.trim() !== '') ? dbId : '(default)');
 
 export const googleProvider = new GoogleAuthProvider();
 

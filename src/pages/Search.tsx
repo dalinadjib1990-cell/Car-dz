@@ -8,10 +8,18 @@ import { Search as SearchIcon, Filter, SlidersHorizontal, X } from 'lucide-react
 import { BRANDS, WILAYAS, FUEL_TYPES } from '../constants/data';
 import { cn } from '../lib/utils';
 
+const getStoredLocalAds = (): Ad[] => {
+  try {
+    return JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+  } catch {
+    return [];
+  }
+};
+
 export default function Search() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [ads, setAds] = useState<Ad[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [ads, setAds] = useState<Ad[]>(getStoredLocalAds);
+  const [loading, setLoading] = useState<boolean>(() => getStoredLocalAds().length === 0);
   const [showFilters, setShowFilters] = useState(false);
 
   const qParam = searchParams.get('q') || '';

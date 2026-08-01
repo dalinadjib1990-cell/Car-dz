@@ -8,51 +8,64 @@ import { ArrowRight, Star, ShieldCheck, Zap, Shield } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Link } from 'react-router-dom';
 
+const getStoredLocalAds = (): Ad[] => {
+  try {
+    return JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+  } catch {
+    return [];
+  }
+};
+
 export default function Home() {
   const { user, profile, isAdmin } = useAuth();
-  const [latestAds, setLatestAds] = useState<Ad[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [latestAds, setLatestAds] = useState<Ad[]>(getStoredLocalAds);
+  const [loading, setLoading] = useState<boolean>(() => getStoredLocalAds().length === 0);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoading(false);
     }, 1500);
 
+    const syncAds = (fsAds: Ad[]) => {
+      const localAds = getStoredLocalAds();
+      const fsIds = new Set(fsAds.map(a => a.id));
+      const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
+      
+      const combined = [...filteredLocal, ...fsAds].sort((a, b) => {
+        const getTimestamp = (val: any) => {
+          if (!val) return 0;
+          if (val.seconds) return val.seconds * 1000;
+          const parsed = new Date(val).getTime();
+          return isNaN(parsed) ? 0 : parsed;
+        };
+        return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
+      });
+
+      setLatestAds(combined);
+      setLoading(false);
+    };
+
     const unsubscribe = onSnapshot(collection(db, 'ads'), (snap) => {
       clearTimeout(timer);
       const fsAds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
-      try {
-        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        const fsIds = new Set(fsAds.map(a => a.id));
-        const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
-        
-        const combined = [...filteredLocal, ...fsAds].sort((a, b) => {
-          const getTimestamp = (val: any) => {
-            if (!val) return 0;
-            if (val.seconds) return val.seconds * 1000;
-            const parsed = new Date(val).getTime();
-            return isNaN(parsed) ? 0 : parsed;
-          };
-          return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
-        });
-
-        setLatestAds(combined);
-      } catch (_) {
-        setLatestAds(fsAds);
-      }
-      setLoading(false);
+      syncAds(fsAds);
     }, (err) => {
       console.warn('Firestore ads stream notice:', err);
-      try {
-        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        setLatestAds(localAds);
-      } catch (_) {}
-      setLoading(false);
+      syncAds([]);
     });
+
+    const handleLocalUpdate = () => {
+      syncAds([]);
+    };
+
+    window.addEventListener('storage', handleLocalUpdate);
+    window.addEventListener('local_ad_posted', handleLocalUpdate);
 
     return () => {
       clearTimeout(timer);
       unsubscribe();
+      window.removeEventListener('storage', handleLocalUpdate);
+      window.removeEventListener('local_ad_posted', handleLocalUpdate);
     };
   }, []);
 

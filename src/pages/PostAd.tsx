@@ -219,6 +219,8 @@ export default function PostAd() {
         const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
         localAds.unshift(newLocalAd);
         localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(localAds));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('local_ad_posted'));
       } catch (err) {
         console.warn('LocalStorage save error:', err);
       }
