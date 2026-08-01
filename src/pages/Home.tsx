@@ -7,14 +7,7 @@ import { AdCard } from '../components/AdCard';
 import { ArrowRight, Star, ShieldCheck, Zap, Shield } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Link } from 'react-router-dom';
-
-const getStoredLocalAds = (): Ad[] => {
-  try {
-    return JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-  } catch {
-    return [];
-  }
-};
+import { getStoredLocalAds, mergeAndDeduplicateAds } from '../utils/adUtils';
 
 export default function Home() {
   const { user, profile, isAdmin } = useAuth();
@@ -27,20 +20,7 @@ export default function Home() {
     }, 1500);
 
     const syncAds = (fsAds: Ad[]) => {
-      const localAds = getStoredLocalAds();
-      const fsIds = new Set(fsAds.map(a => a.id));
-      const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
-      
-      const combined = [...filteredLocal, ...fsAds].sort((a, b) => {
-        const getTimestamp = (val: any) => {
-          if (!val) return 0;
-          if (val.seconds) return val.seconds * 1000;
-          const parsed = new Date(val).getTime();
-          return isNaN(parsed) ? 0 : parsed;
-        };
-        return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
-      });
-
+      const combined = mergeAndDeduplicateAds(fsAds);
       setLatestAds(combined);
       setLoading(false);
     };

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { uploadToCloudinary } from '../lib/cloudinary';
+import { deduplicateAds } from '../utils/adUtils';
 import { BRANDS, MODELS, WILAYAS, FUEL_TYPES, CONDITIONS, REPAIR_OPTIONS, ENGINES, GEARBOXES, AD_TEMPLATES, YEARS } from '../constants/data';
 import { Camera, X, Loader2, CheckCircle2, AlertCircle, PlusSquare, Info, ShieldCheck, Zap, Star, Thermometer, Droplets, Save, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -159,6 +160,8 @@ export default function PostAd() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
+
     if (!user) {
       toast.error('يرجى تسجيل الدخول أولاً');
       navigate('/login');
@@ -180,7 +183,13 @@ export default function PostAd() {
       const sellerName = profile ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() : '';
       const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع الجزائر';
 
+      // Generate single deterministic document reference
+      const newAdRef = doc(collection(db, 'ads'));
+      const adId = newAdRef.id;
+      const createdAtIso = new Date().toISOString();
+
       const adPayload = {
+        id: adId,
         ...formData,
         title: `${finalBrand} ${finalModel} ${formData.year}`,
         brand: finalBrand,
@@ -206,30 +215,22 @@ export default function PostAd() {
         images,
         status: 'active',
         views: 0,
+        createdAt: createdAtIso,
       };
 
-      // 1. Save to local storage immediately
-      const newLocalAd = {
-        ...adPayload,
-        id: 'ad_' + Date.now(),
-        createdAt: new Date().toISOString()
-      };
-
+      // 1. Save to local storage with EXACT same ID
       try {
         const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        localAds.unshift(newLocalAd);
-        localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(localAds));
+        const updatedLocal = deduplicateAds([adPayload, ...localAds.filter((a: any) => a.id !== adId)]);
+        localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(updatedLocal));
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('local_ad_posted'));
       } catch (err) {
         console.warn('LocalStorage save error:', err);
       }
 
-      // 2. Sync to Firestore in background without blocking navigation
-      addDoc(collection(db, 'ads'), {
-        ...adPayload,
-        createdAt: new Date().toISOString(),
-      }).catch((fsErr) => {
+      // 2. Sync to Firestore using setDoc with newAdRef
+      setDoc(newAdRef, adPayload).catch((fsErr) => {
         console.warn('Firestore sync background notice:', fsErr);
       });
 

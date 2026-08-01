@@ -6,6 +6,7 @@ import { Navigate } from 'react-router-dom';
 import { Users, Car, AlertTriangle, Trash2, CheckCircle, XCircle, Shield, ShieldAlert, History } from 'lucide-react';
 import { Ad, UserProfile } from '../types';
 import { securityService, SecurityEvent } from '../services/securityService';
+import { autoDeleteChatsForAd } from '../services/chatService';
 import { toast } from 'sonner';
 
 export default function Admin() {
@@ -63,8 +64,9 @@ export default function Admin() {
     if (!window.confirm("هل أنت متأكد من حذف هذا الإعلان؟")) return;
     try {
       await deleteDoc(doc(db, 'ads', adId));
+      await autoDeleteChatsForAd(adId);
       setAds(prev => prev.filter(a => a.id !== adId));
-      toast.success("تم حذف الإعلان بنجاح");
+      toast.success("تم حذف الإعلان وكافة محادثاته بنجاح");
     } catch (error) {
       toast.error("فشل حذف الإعلان");
     }

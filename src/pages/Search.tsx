@@ -7,14 +7,7 @@ import { AdCard } from '../components/AdCard';
 import { Search as SearchIcon, Filter, SlidersHorizontal, X } from 'lucide-react';
 import { BRANDS, WILAYAS, FUEL_TYPES } from '../constants/data';
 import { cn } from '../lib/utils';
-
-const getStoredLocalAds = (): Ad[] => {
-  try {
-    return JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-  } catch {
-    return [];
-  }
-};
+import { getStoredLocalAds, mergeAndDeduplicateAds } from '../utils/adUtils';
 
 export default function Search() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -42,24 +35,7 @@ export default function Search() {
       clearTimeout(timer);
       const fsAds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
       
-      let allAds = [...fsAds];
-      try {
-        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        const fsIds = new Set(fsAds.map(a => a.id));
-        const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
-        allAds = [...filteredLocal, ...fsAds];
-      } catch (_) {}
-
-      // Sort by newest
-      allAds.sort((a, b) => {
-        const getTimestamp = (val: any) => {
-          if (!val) return 0;
-          if (val.seconds) return val.seconds * 1000;
-          const parsed = new Date(val).getTime();
-          return isNaN(parsed) ? 0 : parsed;
-        };
-        return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
-      });
+      const allAds = mergeAndDeduplicateAds(fsAds);
 
       let results = allAds;
 

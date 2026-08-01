@@ -5,7 +5,8 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { Chat, Message } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
-import { Send, User, Search, MoreVertical, Phone, MessageSquare, Volume2, VolumeX, ArrowRight, CheckCircle2, Image as ImageIcon, Trash2, Edit2, X, Loader2, Bot } from 'lucide-react';
+import { Send, User, Search, MoreVertical, Phone, MessageSquare, Volume2, VolumeX, ArrowRight, CheckCircle2, Image as ImageIcon, Trash2, Edit2, X, Loader2, Bot, AlertTriangle } from 'lucide-react';
+import { deleteSingleMessage, deleteFullChat } from '../services/chatService';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -86,8 +87,24 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
   const [editText, setEditText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [assessingCar, setAssessingCar] = useState(false);
+  const [msgToDelete, setMsgToDelete] = useState<Message | null>(null);
+  const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
+  const touchTimerRef = React.useRef<any>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const handleTouchStartMsg = (msg: Message) => {
+    touchTimerRef.current = setTimeout(() => {
+      setMsgToDelete(msg);
+    }, 450);
+  };
+
+  const handleTouchEndMsg = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current);
+      touchTimerRef.current = null;
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -327,13 +344,36 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
     }
   };
 
-  const handleDeleteMessage = async (msgId: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذه الرسالة؟')) return;
+  const handleDeleteMessage = (msg: Message) => {
+    setMsgToDelete(msg);
+  };
+
+  const handleConfirmDeleteMessage = async () => {
+    if (!msgToDelete) return;
     try {
-      await setDoc(doc(db, 'messages', msgId), { deleted: true, text: 'تم حذف هذه الرسالة' }, { merge: true });
-      toast.success('تم حذف الرسالة');
+      await deleteSingleMessage(msgToDelete.id);
+      setMessages(prev => prev.filter(m => m.id !== msgToDelete.id));
+      toast.success('تم حذف الرسالة نهائياً للطرفين');
     } catch (error) {
       toast.error('فشل حذف الرسالة');
+    } finally {
+      setMsgToDelete(null);
+    }
+  };
+
+  const handleConfirmDeleteChat = async () => {
+    if (!chatToDelete) return;
+    try {
+      await deleteFullChat(chatToDelete.id);
+      setChats(prev => prev.filter(c => c.id !== chatToDelete.id));
+      if (activeChat?.id === chatToDelete.id) {
+        setActiveChat(null);
+      }
+      toast.success('تم حذف المحادثة بالكامل');
+    } catch (error) {
+      toast.error('فشل حذف المحادثة');
+    } finally {
+      setChatToDelete(null);
     }
   };
 
@@ -457,75 +497,86 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
             {loading ? (
               <div className="p-8 text-center text-white/20">جاري التحميل...</div>
             ) : chats.map(chat => (
-              <button
-                key={chat.id}
-                onClick={() => setActiveChat(chat)}
-                className={cn(
-                  "w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-right",
-                  activeChat?.id === chat.id && "bg-white/5 border-r-4 border-brand-green"
-                )}
-              >
-                <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 overflow-hidden">
-                  {(() => {
-                    const otherUid = chat.participants?.find(id => id !== user.uid);
-                    const otherProfile = otherUid ? profiles[otherUid] : null;
-                    if (otherProfile?.photoURL) {
-                      return <img src={otherProfile.photoURL} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />;
-                    }
-                    return <User size={24} className="text-white/40" />;
-                  })()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-sm truncate">
-                      {(() => {
-                        const otherUid = chat.participants?.find(id => id !== user.uid);
-                        const otherProfile = otherUid ? profiles[otherUid] : null;
-                        
-                        if (otherProfile) {
-                          return `${otherProfile.firstName || ''} ${otherProfile.lastName || ''}`.trim() || otherProfile.displayName || otherProfile.email?.split('@')[0];
-                        }
-
-                        const isBuyer = user.uid === chat.buyerId;
-                        const otherName = isBuyer ? chat.sellerName : chat.buyerName;
-                        const otherEmail = isBuyer ? chat.sellerEmail : chat.buyerEmail;
-                        
-                        if (otherName && !otherName.includes('undefined')) return otherName;
-                        if (otherEmail) return otherEmail.split('@')[0];
-                        return isBuyer ? 'بائع' : 'مشتري';
-                      })()}
-                    </span>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="text-[10px] text-white/20">
+              <div key={chat.id} className="relative group/chat">
+                <button
+                  onClick={() => setActiveChat(chat)}
+                  className={cn(
+                    "w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-right",
+                    activeChat?.id === chat.id && "bg-white/5 border-r-4 border-brand-green"
+                  )}
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 overflow-hidden">
+                    {(() => {
+                      const otherUid = chat.participants?.find(id => id !== user.uid);
+                      const otherProfile = otherUid ? profiles[otherUid] : null;
+                      if (otherProfile?.photoURL) {
+                        return <img src={otherProfile.photoURL} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />;
+                      }
+                      return <User size={24} className="text-white/40" />;
+                    })()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-bold text-sm truncate">
                         {(() => {
-                          const val = chat.updatedAt;
-                          if (!val) return '';
-                          const date = typeof val.toDate === 'function' ? val.toDate() : (val.seconds ? new Date(val.seconds * 1000) : null);
-                          return date ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                          const otherUid = chat.participants?.find(id => id !== user.uid);
+                          const otherProfile = otherUid ? profiles[otherUid] : null;
+                          
+                          if (otherProfile) {
+                            return `${otherProfile.firstName || ''} ${otherProfile.lastName || ''}`.trim() || otherProfile.displayName || otherProfile.email?.split('@')[0];
+                          }
+
+                          const isBuyer = user.uid === chat.buyerId;
+                          const otherName = isBuyer ? chat.sellerName : chat.buyerName;
+                          const otherEmail = isBuyer ? chat.sellerEmail : chat.buyerEmail;
+                          
+                          if (otherName && !otherName.includes('undefined')) return otherName;
+                          if (otherEmail) return otherEmail.split('@')[0];
+                          return isBuyer ? 'بائع' : 'مشتري';
                         })()}
                       </span>
-                      {chat.unreadCount?.[user.uid] > 0 && (
-                        <span className="bg-brand-green text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
-                          {chat.unreadCount[user.uid]}
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-[10px] text-white/20">
+                          {(() => {
+                            const val = chat.updatedAt;
+                            if (!val) return '';
+                            const date = typeof val.toDate === 'function' ? val.toDate() : (val.seconds ? new Date(val.seconds * 1000) : null);
+                            return date ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                          })()}
                         </span>
-                      )}
+                        {chat.unreadCount?.[user.uid] > 0 && (
+                          <span className="bg-brand-green text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                            {chat.unreadCount[user.uid]}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        {(chat.adImage || activeAd?.images?.[0]) && (
+                          <img src={chat.adImage || activeAd?.images?.[0]} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                        )}
+                        <p className="text-[10px] text-brand-green font-bold truncate flex-1">{chat.adTitle}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {chat.adPrice && <span className="text-[9px] text-emerald-400 font-bold">{chat.adPrice.toLocaleString()} دج</span>}
+                        {chat.adSamouni && <span className="text-[9px] text-red-500 font-bold">سوموني: {chat.adSamouni.toLocaleString()}</span>}
+                      </div>
+                    </div>
+                    <p className="text-xs text-white/40 truncate mt-1">{chat.lastMessage || 'لا توجد رسائل بعد'}</p>
                   </div>
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      {(chat.adImage || activeAd?.images?.[0]) && (
-                        <img src={chat.adImage || activeAd?.images?.[0]} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
-                      )}
-                      <p className="text-[10px] text-brand-green font-bold truncate flex-1">{chat.adTitle}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      {chat.adPrice && <span className="text-[9px] text-emerald-400 font-bold">{chat.adPrice.toLocaleString()} دج</span>}
-                      {chat.adSamouni && <span className="text-[9px] text-red-500 font-bold">سوموني: {chat.adSamouni.toLocaleString()}</span>}
-                    </div>
-                  </div>
-                  <p className="text-xs text-white/40 truncate mt-1">{chat.lastMessage || 'لا توجد رسائل بعد'}</p>
-                </div>
-              </button>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setChatToDelete(chat);
+                  }}
+                  className="absolute left-2 top-2 p-1.5 rounded-lg bg-red-500/10 text-red-400 opacity-0 group-hover/chat:opacity-100 hover:bg-red-500/20 transition-all"
+                  title="حذف المحادثة بالكامل"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
             {!loading && chats.length === 0 && (
               <div className="p-12 text-center text-white/20 text-sm">لا توجد محادثات نشطة</div>
@@ -625,6 +676,13 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                   </button>
                   <button className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40"><Phone size={18} /></button>
                   <button 
+                    onClick={() => setChatToDelete(activeChat)}
+                    className="p-2 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-colors text-white/40 hover:text-red-400"
+                    title="حذف المحادثة بالكامل"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <button 
                     onClick={() => setActiveChat(null)}
                     className="p-2 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors text-white/40"
                     title="إغلاق المحادثة"
@@ -691,13 +749,19 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                   const isMe = msg.senderId === user.uid;
                   const isAI = msg.senderId === 'AI_EXPERT';
                   return (
-                  <div key={msg.id} className={cn(
-                    "flex group relative w-full mb-6 items-end",
-                    isAI ? "justify-center" : (isMe ? "justify-start" : "justify-end")
-                  )}>
+                  <div 
+                    key={msg.id} 
+                    onTouchStart={() => handleTouchStartMsg(msg)}
+                    onTouchEnd={handleTouchEndMsg}
+                    onTouchCancel={handleTouchEndMsg}
+                    className={cn(
+                      "flex group relative w-full mb-6 items-end select-none",
+                      isAI ? "justify-center" : (isMe ? "justify-start" : "justify-end")
+                    )}
+                  >
                     <div className="flex flex-col gap-1 max-w-[95%] md:max-w-[85%]">
                       <div className={cn(
-                        "relative shadow-sm whitespace-pre-wrap leading-relaxed w-fit break-words",
+                        "relative shadow-sm whitespace-pre-wrap leading-relaxed w-fit break-words cursor-pointer",
                         isAI 
                            ? "bg-[#18181b] text-white rounded-2xl border border-white/10 w-full p-4 md:p-5 shadow-xl" 
                           : (isMe
@@ -740,10 +804,15 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                           </>
                         )}
                         
-                        {isMe && !msg.deleted && (
-                          <div className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-center gap-1.5 z-10">
-                            <button onClick={() => { setEditingMessageId(msg.id); setEditText(msg.text); }} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Edit2 size={13} /></button>
-                            <button onClick={() => handleDeleteMessage(msg.id)} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110"><Trash2 size={13} /></button>
+                        {!msg.deleted && !isAI && (
+                          <div className={cn(
+                            "absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-center gap-1.5 z-10",
+                            isMe ? "-left-12" : "-right-12"
+                          )}>
+                            {isMe && (
+                              <button onClick={() => { setEditingMessageId(msg.id); setEditText(msg.text); }} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110" title="تعديل"><Edit2 size={13} /></button>
+                            )}
+                            <button onClick={() => handleDeleteMessage(msg)} className="w-8 h-8 flex items-center justify-center bg-[#18181b] border border-white/10 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-colors shadow-lg shadow-black/20 transform hover:scale-110" title="حذف الرسالة"><Trash2 size={13} /></button>
                           </div>
                         )}
                       </div>
@@ -803,6 +872,68 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
           )}
         </div>
       </div>
+
+      {/* Delete Single Message Modal */}
+      {msgToDelete && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-5 text-center shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+              <Trash2 size={24} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-black text-lg text-white">تأكيد حذف الرسالة</h3>
+              <p className="text-xs text-white/60 leading-relaxed">
+                هل أنت متأكد من رغبتك في حذف هذه الرسالة نهائياً؟ سيتم حذفها من عند البائع والمشتري معاً.
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={() => setMsgToDelete(null)}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 rounded-xl text-xs font-bold transition-all"
+              >
+                إلغاء
+              </button>
+              <button 
+                onClick={handleConfirmDeleteMessage}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-red-600/30"
+              >
+                حذف الرسالة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Full Chat Modal */}
+      {chatToDelete && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-5 text-center shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+              <AlertTriangle size={24} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-black text-lg text-white">تأكيد حذف المحادثة بالكامل</h3>
+              <p className="text-xs text-white/60 leading-relaxed">
+                هل أنت متأكد من حذف هذه المحادثة بالكامل وكافة الرسائل التي بداخلها؟ سيتم حذفها نهائياً للبائع والمشتري.
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={() => setChatToDelete(null)}
+                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 rounded-xl text-xs font-bold transition-all"
+              >
+                إلغاء
+              </button>
+              <button 
+                onClick={handleConfirmDeleteChat}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-red-600/30"
+              >
+                مسح المحادثة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
