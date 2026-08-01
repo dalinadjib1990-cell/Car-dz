@@ -30,55 +30,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     }, 1800);
 
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
       clearTimeout(timer);
       setUser(u);
-      
+      setLoading(false); // Immediate unblock
+
       if (u) {
-        try {
-          const userEmail = u.email?.toLowerCase().trim();
-          const masterEmail = "dalinadjib1990@gmail.com";
-          const isMaster = userEmail === masterEmail;
-          
-          const docRef = doc(db, 'users', u.uid);
-          // Set a fast race timeout on Firestore profile fetch
-          const docSnap = await Promise.race([
-            getDoc(docRef),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
-          ]);
-          
-          if (docSnap && docSnap.exists()) {
-            const data = docSnap.data();
-            if (isMaster && data.role !== 'admin') {
-              await updateDoc(docRef, { role: 'admin' });
-              setProfile({ ...data, role: 'admin' } as UserProfile);
-            } else {
-              setProfile(data as UserProfile);
-            }
-          } else {
-            const newProfile: UserProfile = {
-              uid: u.uid,
-              email: u.email || '',
-              firstName: u.displayName?.split(' ')[0] || '',
-              lastName: u.displayName?.split(' ').slice(1).join(' ') || '',
-              wilaya: 'الجزائر',
-              phone: '',
-              photoURL: u.photoURL || '',
-              role: isMaster ? 'admin' : 'user',
-              createdAt: serverTimestamp(),
-            };
-            if (docSnap !== null) {
+        const syncProfile = async () => {
+          try {
+            const userEmail = u.email?.toLowerCase().trim();
+            const masterEmail = "dalinadjib1990@gmail.com";
+            const isMaster = userEmail === masterEmail;
+            
+            const docRef = doc(db, 'users', u.uid);
+            const docSnap = await Promise.race([
+              getDoc(docRef),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500))
+            ]);
+            
+            if (docSnap && docSnap.exists()) {
+              const data = docSnap.data();
+              if (isMaster && data.role !== 'admin') {
+                await updateDoc(docRef, { role: 'admin' });
+                setProfile({ ...data, role: 'admin' } as UserProfile);
+              } else {
+                setProfile(data as UserProfile);
+              }
+            } else if (docSnap !== null) {
+              const newProfile: UserProfile = {
+                uid: u.uid,
+                email: u.email || '',
+                firstName: u.displayName?.split(' ')[0] || '',
+                lastName: u.displayName?.split(' ').slice(1).join(' ') || '',
+                wilaya: 'الجزائر',
+                phone: '',
+                photoURL: u.photoURL || '',
+                role: isMaster ? 'admin' : 'user',
+                createdAt: serverTimestamp(),
+              };
               await setDoc(docRef, newProfile);
+              setProfile(newProfile);
             }
-            setProfile(newProfile);
+          } catch (error) {
+            handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
-        }
+        };
+        syncProfile();
       } else {
         setProfile(null);
       }
-      setLoading(false);
     });
 
     return () => {

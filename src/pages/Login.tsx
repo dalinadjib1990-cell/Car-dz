@@ -24,7 +24,11 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     try {
-      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      try {
+        setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
+      } catch (_) {
+        // Non-blocking persistence call
+      }
       
       if (isRegister) {
         // If user provided phone but no email, we create a dummy email for Firebase Auth
