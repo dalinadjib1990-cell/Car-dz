@@ -20,20 +20,22 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
 // Use default database if dbId is empty or default, otherwise initialize custom database ID
-export const db = (dbId && dbId !== '(default)' && dbId.trim() !== '')
-  ? initializeFirestore(app, { experimentalForceLongPolling: true }, dbId)
-  : getFirestore(app);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+}, (dbId && dbId !== '(default)' && dbId.trim() !== '') ? dbId : '(default)');
 
 export const googleProvider = new GoogleAuthProvider();
 
 // Connection Test
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocFromServer(doc(db, 'ads', 'connection_test'));
     console.log("Firestore connection verified.");
   } catch (error: any) {
-    if (error.message?.includes('the client is offline') || error.code === 'unavailable') {
-      console.error("CRITICAL: Firestore configuration error or network blocked.");
+    if (error.code === 'permission-denied' || error.code === 'not-found') {
+      console.log("Firestore connection verified.");
+    } else if (error.message?.includes('the client is offline') || error.code === 'unavailable') {
+      console.warn("Firestore status: offline or connecting...");
     }
   }
 }

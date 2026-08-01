@@ -180,7 +180,7 @@ export default function PostAd() {
       const sellerName = profile ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() : '';
       const finalSellerName = sellerName || user.displayName || user.email?.split('@')[0] || 'بائع';
 
-      await addDoc(collection(db, 'ads'), {
+      const addAdPromise = addDoc(collection(db, 'ads'), {
         ...formData,
         brand: finalBrand,
         model: finalModel,
@@ -208,13 +208,23 @@ export default function PostAd() {
         createdAt: serverTimestamp(),
       });
 
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 12000)
+      );
+
+      await Promise.race([addAdPromise, timeoutPromise]);
+
       // Clear draft on successful submit
       localStorage.removeItem('market_auto_dz_ad_draft');
       toast.success('تم نشر إعلانك بنجاح!');
       navigate('/');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('حدث خطأ أثناء نشر الإعلان');
+      if (error?.message === 'TIMEOUT') {
+        toast.error('استغرقت الاستجابة وقتاً طويلاً. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة');
+      } else {
+        toast.error('حدث خطأ أثناء نشر الإعلان: ' + (error?.message || 'خطأ في الخادم'));
+      }
     } finally {
       setLoading(false);
     }
