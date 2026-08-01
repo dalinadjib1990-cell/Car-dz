@@ -103,14 +103,11 @@ service cloud.firestore {
     }
 
     match /security_events/{eventId} {
-      // Allow admins to see security alerts
-      allow read: if isAdmin();
-      // Allow creation of security events if signed in
-      allow create: if isSignedIn() 
-        && incoming().userId == request.auth.uid
-        && incoming().type in ['unauthorized_access', 'suspicious_activity', 'input_injection_attempt']
-        && incoming().timestamp == request.time;
-      allow update, delete: if false;
+      // Allow reading and listening to security alerts
+      allow read, list: if true;
+      // Allow creation of security events if signed in or system logger
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
   }
 }

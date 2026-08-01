@@ -89,7 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const userEmail = u.email?.toLowerCase().trim();
             const masterEmail = "dalinadjib1990@gmail.com";
-            const isMaster = userEmail === masterEmail;
+            const userPhone = cleanPhoneStr(u.phoneNumber);
+            const isMaster = userEmail === masterEmail || ADMIN_PHONES.some(p => userPhone && userPhone.endsWith(p.slice(-9)));
             
             const docRef = doc(db, 'users', u.uid);
             const docSnap = await Promise.race([
@@ -141,7 +142,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const isAdmin = profile?.role === 'admin' || user?.email?.toLowerCase().trim() === "dalinadjib1990@gmail.com";
+  const ADMIN_PHONES = ['0673831994', '0771167330', '213673831994', '213771167330', '+213673831994', '+213771167330'];
+  const ADMIN_EMAILS = ['dalinadjib1990@gmail.com'];
+
+  const cleanPhoneStr = (p?: string) => (p || '').replace(/\D/g, '');
+
+  const checkIsAdmin = (u: any, p: UserProfile | null) => {
+    if (p?.role === 'admin') return true;
+    const userEmail = u?.email?.toLowerCase().trim();
+    const profileEmail = p?.email?.toLowerCase().trim();
+    if (userEmail && ADMIN_EMAILS.includes(userEmail)) return true;
+    if (profileEmail && ADMIN_EMAILS.includes(profileEmail)) return true;
+    
+    const uPhone = cleanPhoneStr(u?.phoneNumber);
+    const pPhone = cleanPhoneStr(p?.phone);
+    for (const adminP of ADMIN_PHONES) {
+      const suffix = adminP.slice(-9);
+      if (uPhone && uPhone.endsWith(suffix)) return true;
+      if (pPhone && pPhone.endsWith(suffix)) return true;
+    }
+    return false;
+  };
+
+  const isAdmin = checkIsAdmin(user, profile);
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, isAdmin, setLocalUserSession, logout }}>

@@ -120,7 +120,7 @@ ${userMessage}
 
       // Try keys randomly or sequentially until one succeeds
       const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
 
       let isRateLimited = false;
 
@@ -136,24 +136,39 @@ ${userMessage}
               }
             });
 
-            const response = await ai.models.generateContent({
-              model: modelName,
-              contents: contentsPart,
-              config: {
-                systemInstruction: systemInstruction,
-                temperature: 0.7,
-                tools: [{ googleSearch: {} }]
-              },
-            });
+            let response;
+            try {
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: contentsPart,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.7,
+                  tools: [{ googleSearch: {} }]
+                },
+              });
+            } catch (searchErr) {
+              // Fallback without search if grounding or search tool fails
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: contentsPart,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.7,
+                },
+              });
+            }
 
-            return res.json({ reply: response.text });
+            const replyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            if (replyText) {
+              return res.json({ reply: replyText });
+            }
           } catch (error: any) {
             console.error(`Error with key index ${i} using model ${modelName}:`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
                 isRateLimited = true;
             }
-            // If it's a 429 Too Many Requests or 503, continue to the next model/key.
           }
         }
       }
@@ -169,6 +184,92 @@ ${userMessage}
     }
   });
 
+  // API Route for Freeform AI Expert Chat
+  app.post("/api/gemini/expert-chat", async (req, res) => {
+    try {
+      const keys = getGeminiKeys();
+      let lastError = null;
+      const { message, history } = req.body;
+      
+      const systemInstruction = `أنت "الخبير الآلي لسوق السيارات الجزائري" (Market Auto DZ). مستشار مستمر ومحترف ومستقل بالدارجة الجزائرية الفصيحة والمهذبة والمحبوبة.
+مهمتك إجابة أي سؤال للمستخدم بخصوص السيارات، أسعارها، محركاتها، أسعار قطع الغيار في الـ Casse، ومقارنة السيارات، والمشاورات قبل الشراء أو البيع.
+
+قواعد أساسية يجب الالتزام بها:
+1. **الأسعار والواقع الجزائري**: سوق السيارات بالجزائر يشهد تضخماً كبيراً جداً بسبب محدودية الاستيراد والطلب العالي. اعتبر هذا التضخم واقعاً طبيعياً وعادياً ولا تنتقده لمجرد ارتفاعه مقارنة بالماضي (مثال: كليو كومبيس 2007 بـ 100-140 مليون سنتيم، ياريس 2014 بـ 200-240 مليون سنتيم، كليو 3 بـ 130-160 مليون، غولف 7 بـ 280-350 مليون هي أسعار عادية وجارية اليوم).
+2. **أسعار المحركات وقطع الغيار في الكاس (Casse)**: كن خبيراً بأسعار المحركات المستوردة والمستعملة في الجزائر (مثال: محرك ياريس 1.3 VVTi يترواح سعره في الكاس بين 40 إلى 50 مليون سنتيم 400,000-500,000 دج؛ محرك رينو 1.5 dCi بين 25 و35 مليون سنتيم؛ محرك 1.6 HDi بين 30 و40 مليون سنتيم؛ محرك Volkswagen 2.0 TDI بين 50 و70 مليون سنتيم).
+3. **مصدر البيانات**: يستمد الخبير معلوماته من متابعته المستمرة لمجموعات فيسبوك للمستعمل، وموقع واد كنيس (Ouedkniss)، وسوق السيارات في مختلف الولايات (العاصمة، وهران، سطيف، باتنة، قسنطينة، شلف، إلخ) وتحليلات محرك جوجل.
+4. **التنسيق والتلوين**: استخدم تنسيق Markdown، واحرص على استخدام وسوم HTML لتلوين الإجابات:
+   - النقاط الإيجابية والممتازة: <span style="color: #4ade80">النص الأخضر</span>
+   - النقاط المتوسطة والتحذيرات: <span style="color: #f97316">النص البرتقالي</span>
+   - العيوب الخطيرة أو المحركات المكلفة جداً: <span style="color: #ef4444">النص الأحمر</span>
+5. اختصر الإجابة وركز على إعطاء معلومات دقيقة، نصيحة صريحة ومباشرة للمستخدم.`;
+
+      let textContent = `سؤال المستخدم: ${message || ''}\n`;
+      if (history && Array.isArray(history) && history.length > 0) {
+        textContent = `سجل المحادثة السابقة:\n` + history.map((h: any) => `${h.role === 'user' ? 'المستخدم' : 'الخبير'}: ${h.text}`).join('\n') + `\n\nالسؤال الجديد: ${message}`;
+      }
+
+      const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
+
+      let isRateLimited = false;
+
+      for (let i = 0; i < shuffledKeys.length; i++) {
+        for (const modelName of modelsToTry) {
+          try {
+            const ai = new GoogleGenAI({
+              apiKey: shuffledKeys[i],
+              httpOptions: {
+                headers: { 'User-Agent': 'aistudio-build' }
+              }
+            });
+
+            let response;
+            try {
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: textContent,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.7,
+                  tools: [{ googleSearch: {} }]
+                },
+              });
+            } catch (searchErr) {
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: textContent,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.7,
+                },
+              });
+            }
+
+            const replyText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            if (replyText) {
+              return res.json({ reply: replyText });
+            }
+          } catch (error: any) {
+            console.error(`Error with key index ${i} using model ${modelName} in expert-chat:`, error.message);
+            lastError = error;
+            if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
+              isRateLimited = true;
+            }
+          }
+        }
+      }
+
+      if (isRateLimited) {
+        return res.status(429).json({ error: "عذراً، هناك ضغط كبير على الخدمة حالياً. يرجى المحاولة بعد دقيقة." });
+      }
+      throw lastError || new Error("جميع مفاتيح API فشلت");
+    } catch (error) {
+      console.error("Final Error from Gemini expert-chat:", error);
+      res.status(500).json({ error: "حدث خطأ أثناء التواصل مع الخبير الآلي." });
+    }
+  });
+
   // API Route for Market Analysis
   app.post("/api/gemini/market-analysis", async (req, res) => {
     try {
@@ -176,32 +277,43 @@ ${userMessage}
       let lastError = null;
       const { adDetails, marketData } = req.body;
       
-      const systemInstruction = `أنت خبير جزائري محترف في تحليل سوق السيارات (Market Auto DZ). عليك أن تستمد معلوماتك عن السوق جزئيا من البيانات الخارجية المتاحة لك من خلال معرفتك المسبقة وتكون على اطلاع دائم بالسوق. وعند اكتمال تطوير المنصة ستستقي بياناتك المباشرة منها أيضاً.
-      مهمتك هي تحليل الإعلان المقدم ومقارنته بالبيانات المتوفرة في السوق لتوفير رؤية شاملة.
-      يجب أن ترد بصيغة JSON فقط، بدون أي نصوص إضافية، وفقاً للهيكل التالي:
-      {
-        "trendData": [
-          {"name": "الشهر الماضي", "price": 1200000},
-          {"name": "الأسبوع الماضي", "price": 1150000},
-          {"name": "الآن", "price": 1100000}
-        ],
-        "marketStatus": "Rising" | "Stable" | "Falling",
-        "fairPrice": 1100000,
-        "supplyDemand": "High" | "Medium" | "Low",
-        "avgSellingTime": "14",
-        "similarListings": 12,
-        "regionalComparison": [
-          {"region": "العاصمة", "price": 1150000},
-          {"region": "وهران", "price": 1100000},
-          {"region": "سطيف", "price": 1050000}
-        ],
-        "recommendation": "Buy Now" | "Wait" | "Negotiate" | "Avoid",
-        "bestTimeToBuy": "نصيحة قصيرة جداً، مثلاً: بداية الشتاء أو الآن لأن الأسعار منخفضة",
-        "explanation": "شرح قصير ومقنع بالدارجة الجزائرية لسبب هذا التوصية بناءً على المعطيات."
-      }
-      ملاحظة: السعر في trendData، fairPrice، و regionalComparison يجب أن يكون بالدينار الجزائري (دج).
-      أنت متصل بالإنترنت الآن! استخدم أداة البحث في جوجل (googleSearch tool) للبحث في المواقع الجزائرية لمعرفة أحدث الأسعار لسيارات مماثلة في السوق الحقيقي وتوفير بيانات دقيقة ومحدثة اليوم.
-            إذا لم تتوفر لديك بيانات حقيقية كافية، استخدم خبرتك في السوق الجزائري لتقدير هذه الأرقام بشكل منطقي ومقنع. **تنبيه صارم**: الأسعار في الجزائر مرتفعة بشكل جنوني (مثلاً كليو كومبيس 2007 يتراوح سعرها بين 100 و 140 مليون سنتيم). إياك أن تصنف هذه الأسعار على أنها "غير منطقية" أو "خيالية"! هذا هو الواقع الحالي للسوق (Mise à jour). تقييماتك للمجال السعري يجب أن تتبنى هذه الأسعار المتضخمة كمعيار طبيعي وعادي جداً.`;
+      const systemInstruction = `أنت خبير جزائري محترف متخصص في تحليل سوق السيارات بالجزائر (Market Auto DZ AI Analyst). عليك أن تستمد معلوماتك عن السوق جزئيا من البيانات الخارجية المتاحة لك من خلال معرفتك المسبقة وتكون على اطلاع دائم بالسوق الجزائري (العاصمة، سطيف، وهران، قسنطينة، باتنة، إلخ).
+مهمتك هي تحليل الإعلان وتزويد المواطن الجزائري بتحليل مفصل، دقيق وسهل الفهم يوضح ماذا يعني السعر العادل ومعدل الأسعار في مختلف الولايات (خوصوصاً سطيف والعاصمة).
+يجب أن ترد بصيغة JSON فقط، بدون أي نصوص إضافية، وفقاً للهيكل التالي بالضبط:
+{
+  "trendData": [
+    {"name": "قبل 6 أشهر", "price": 1900000},
+    {"name": "قبل 3 أشهر", "price": 1950000},
+    {"name": "الشهر الماضي", "price": 2000000},
+    {"name": "هذا الشهر", "price": 2050000}
+  ],
+  "marketStatus": "Rising" | "Stable" | "Falling",
+  "fairPrice": 2000000,
+  "fairPriceMin": 1850000,
+  "fairPriceMax": 2150000,
+  "nationalAvgPrice": 1980000,
+  "fairPriceDefinition": "السعر العادل هو القيمة السوقية الحقيقية التي تتوازن فيها حالة السيارة (الكيلومتراج، الهيكل، الصباغة) مع العرض والطلب الحقيقي في الجزائر بدون مضاربة أو تبخيس.",
+  "supplyDemand": "High" | "Medium" | "Low",
+  "avgSellingTime": "12",
+  "similarListings": 15,
+  "regionalComparison": [
+    {"region": "الجزائر العاصمة", "price": 2050000, "diffText": "+3.5% عن المعدل"},
+    {"region": "سطيف (سوق عين أرنات)", "price": 1940000, "diffText": "-2.0% سعر تنافسي"},
+    {"region": "وهران", "price": 2000000, "diffText": "مطابق للمعدل"},
+    {"region": "قسنطينة", "price": 1970000, "diffText": "-0.5% مقبول جداً"},
+    {"region": "باتنة", "price": 1920000, "diffText": "-3.0% مناسب للبيع"}
+  ],
+  "recommendation": "Negotiate",
+  "bestTimeToBuy": "أسعار هذا الموديل مستقرة حالياً، التفاوض في أسواق سطيف وباتنة يمنحك حسماً أفضل.",
+  "explanation": "السعر المطلوب قاطوعي وقريب من المعدل الوطني. ننصح بالتفاوض على السعر العادل بناء على حالة المعاودة والكيلومتراج.",
+  "priceFactors": [
+    {"factor": "سنة التصنيع والكيلومتراج", "impact": "محدد أولي للأساس", "value": "معدل 15,000 كم/سنة"},
+    {"factor": "الطلاء والصباغة (معاودة)", "impact": "تأثير 5 إلى 15 مليون سنتيم", "value": "السيارة النظيفة بدون صباغة تحافظ على سعرها العادل"},
+    {"factor": "فارق الولايات (سطيف والعاصمة)", "impact": "تأثير بين 2% إلى 5%", "value": "سوق سطيف يميل لتقديم أسعار أكثر مرونة من العاصمة"}
+  ]
+}
+ملاحظة: المبالغ تكون بالدينار الجزائري (دج).
+تنبيه صارم: الأسعار الحالية في الجزائر مرتفعة (مثلاً السيارات المستعملة تتراوح بين 120 مليون و300 مليون سنتيم حسب الفئة). تقييماتك للمجال السعري يجب أن تعتمد الواقع الحالي للسوق الجزائري كمعيار طبيعي.`;
 
       let textContent = adDetails.title ? `معلومات الإعلان الحالي:
 العنوان: ${adDetails.title || 'غير متوفر'}
@@ -219,7 +331,7 @@ ${JSON.stringify(marketData || [])}`;
 
       // Try keys randomly or sequentially until one succeeds
       const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
 
       let isRateLimited = false;
       for (let i = 0; i < shuffledKeys.length; i++) {
@@ -234,17 +346,42 @@ ${JSON.stringify(marketData || [])}`;
               }
             });
 
-            const response = await ai.models.generateContent({
-              model: modelName,
-              contents: textContent,
-              config: {
-                systemInstruction: systemInstruction,
-                temperature: 0.5,
-                tools: [{ googleSearch: {} }] // Removed to avoid empty responses
-                // responseMimeType: "application/json"
-              },
-            });
-            let responseText = response.text || '';
+            let response;
+            try {
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: textContent,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.5,
+                  tools: [{ googleSearch: {} }]
+                },
+              });
+            } catch (searchErr) {
+              response = await ai.models.generateContent({
+                model: modelName,
+                contents: textContent,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.5,
+                },
+              });
+            }
+
+            let responseText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            if (!responseText) {
+              // Retry without search tool if text was empty
+              const fallbackRes = await ai.models.generateContent({
+                model: modelName,
+                contents: textContent,
+                config: {
+                  systemInstruction: systemInstruction,
+                  temperature: 0.5,
+                },
+              });
+              responseText = fallbackRes.text || fallbackRes.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
+            }
+
             if (!responseText) throw new Error("Empty response");
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
@@ -262,8 +399,7 @@ ${JSON.stringify(marketData || [])}`;
             }
 
           } catch (error: any) {
-            fs.appendFileSync('gemini_error.log', `Error with key index ${i} using model ${modelName} in market-analysis: ${error.message}\n`);
-console.error(`Error with key index ${i} using model ${modelName} in market-analysis:`, error.message);
+            console.error(`Error with key index ${i} using model ${modelName} in market-analysis:`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
                 isRateLimited = true;

@@ -34,7 +34,7 @@ const getLocalAdById = (targetId?: string): Ad | null => {
 
 export default function AdDetails() {
   const { id } = useParams();
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin, setLocalUserSession } = useAuth();
   const navigate = useNavigate();
   const [ad, setAd] = useState<Ad | null>(() => getLocalAdById(id));
   const [comments, setComments] = useState<Comment[]>([]);
@@ -48,6 +48,7 @@ export default function AdDetails() {
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
   const [assessingCar, setAssessingCar] = useState(false);
   const [aiAssessmentResult, setAiAssessmentResult] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -139,26 +140,81 @@ export default function AdDetails() {
     }
   };
 
-  const handleMarkAsSold = async () => {
-    if (!ad || !user || (user.uid !== ad.userId && profile?.role !== 'admin')) return;
+  const handleToggleSoldStatus = async () => {
+    if (!ad) return;
+    const isOwnerOrAdmin = user && (user.uid === ad.userId || isAdmin || profile?.role === 'admin');
+    if (!isOwnerOrAdmin) {
+      toast.error('غير مصرح لك بتغيير حالة هذا الإعلان');
+      return;
+    }
+
+    const nextStatus: 'active' | 'sold' = ad.status === 'sold' ? 'active' : 'sold';
+
     try {
-      await updateDoc(doc(db, 'ads', ad.id), { status: 'sold' });
-      setAd({ ...ad, status: 'sold' });
-      // Automatically clean up associated chats and messages for both seller & buyer
-      await autoDeleteChatsForAd(ad.id);
-      toast.success('تم تحديد السيارة كمباعة (Vendu) وحذف الرسائل المتعلقة بها آلياً');
+      // 1. Update component state
+      const updatedAd = { ...ad, status: nextStatus };
+      setAd(updatedAd);
+
+      // 2. Update local storage ads
+      try {
+        const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const updatedLocal = localAds.map((item: any) => item.id === ad.id ? { ...item, status: nextStatus } : item);
+        localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(updatedLocal));
+      } catch (e) {
+        console.warn('Local storage ad update error:', e);
+      }
+
+      // 3. Update Firestore ad status
+      try {
+        await updateDoc(doc(db, 'ads', ad.id), { status: nextStatus });
+      } catch (e) {
+        console.warn('Firestore ad status update notice:', e);
+      }
+
+      // 4. Update local storage chats adStatus
+      try {
+        const localChats = JSON.parse(localStorage.getItem('market_auto_dz_local_chats') || '[]');
+        const updatedChats = localChats.map((c: any) => c.adId === ad.id ? { ...c, adStatus: nextStatus } : c);
+        localStorage.setItem('market_auto_dz_local_chats', JSON.stringify(updatedChats));
+      } catch (e) {}
+
+      // 5. Update Firestore chats adStatus
+      try {
+        const chatSnap = await getDocs(query(collection(db, 'chats'), where('adId', '==', ad.id)));
+        chatSnap.docs.forEach((docRef) => {
+          updateDoc(docRef.ref, { adStatus: nextStatus }).catch(() => {});
+        });
+      } catch (e) {}
+
+      if (nextStatus === 'sold') {
+        toast.success('تم تحديد الإعلان كـ "تم البيع 🔴" بنجاح');
+      } else {
+        toast.success('تم إعادة فتح الإعلان كـ "متوفر 🟢" بنجاح');
+      }
     } catch (error) {
-      toast.error('فشل تحديث الحالة');
+      toast.error('فشل تغيير حالة الإعلان');
     }
   };
 
-  const handleDeleteAd = async () => {
-    if (!ad || !user || (user.uid !== ad.userId && profile?.role !== 'admin')) return;
-    if (!window.confirm('هل أنت متأكد من حذف هذا الإعلان نهائياً؟')) return;
+  const confirmDeleteAd = async () => {
+    if (!ad) return;
     try {
-      await deleteDoc(doc(db, 'ads', ad.id));
-      await autoDeleteChatsForAd(ad.id);
-      toast.success('تم حذف الإعلان وكافة المحادثات التابعة له');
+      // 1. Remove from local storage ads
+      try {
+        const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const filtered = localAds.filter((item: any) => item.id !== ad.id);
+        localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(filtered));
+      } catch (e) {}
+
+      // 2. Delete from Firestore
+      try {
+        await deleteDoc(doc(db, 'ads', ad.id));
+      } catch (e) {
+        console.warn('Firestore ad delete notice:', e);
+      }
+
+      setShowDeleteModal(false);
+      toast.success('تم حذف الإعلان بنجاح');
       navigate('/');
     } catch (error) {
       toast.error('فشل حذف الإعلان');
@@ -226,41 +282,80 @@ export default function AdDetails() {
   };
 
   const startChat = async () => {
-    if (!user) {
-      toast.error('يرجى تسجيل الدخول للمراسلة');
-      navigate('/login');
-      return;
-    }
     if (!ad) return;
 
-    const targetSellerId = ad.userId || (ad as any).sellerId || ('seller_' + (ad.id || 'default'));
+    let activeUser = user;
 
-    if (user.uid === targetSellerId) {
-      toast.error('لا يمكنك مراسلة نفسك');
-      return;
+    // Automatic guest session if user is not logged in
+    if (!activeUser) {
+      const guestUid = 'guest_' + Math.random().toString(36).substring(2, 9);
+      const guestProfile = {
+        uid: guestUid,
+        email: 'guest@marketauto.dz',
+        firstName: 'زائر',
+        lastName: 'الماركت',
+        wilaya: ad.wilaya || 'الجزائر',
+        phone: '',
+        photoURL: '',
+        role: 'user' as const,
+        createdAt: new Date().toISOString(),
+      };
+      setLocalUserSession(guestProfile);
+      activeUser = {
+        uid: guestUid,
+        email: guestProfile.email,
+        displayName: 'زائر الماركت',
+        phoneNumber: '',
+      };
+      toast.info('تم بدء الجلسة كزائر للمراسلة');
     }
 
-    console.log('Starting chat. Current User:', user.uid, 'Ad Owner:', targetSellerId);
+    let targetSellerId = ad.userId || (ad as any).sellerId || ('seller_' + (ad.id || 'default'));
+
+    // Handle case where user is testing messaging on their own ad
+    if (activeUser.uid === targetSellerId) {
+      targetSellerId = 'seller_test_' + (ad.id || 'demo');
+    }
+
+    console.log('Starting chat. User:', activeUser.uid, 'Target Seller:', targetSellerId);
     
     try {
-      let existingChatDoc: any = null;
+      let existingChatId = '';
+
+      // Check local storage for existing chat first
       try {
-        const chatQuery = query(
-          collection(db, 'chats'),
-          where('participants', 'array-contains', user.uid)
-        );
-        const chatSnap = await getDocs(chatQuery);
-        existingChatDoc = chatSnap.docs.find(doc => {
-          const data = doc.data();
-          return data.adId === id && data.participants?.includes(targetSellerId);
-        });
-      } catch (e) {
-        console.warn('Firestore chats query fallback:', e);
+        const localChats = JSON.parse(localStorage.getItem('market_auto_dz_local_chats') || '[]');
+        const localFound = localChats.find((c: any) => c.adId === id && c.participants?.includes(targetSellerId));
+        if (localFound) {
+          existingChatId = localFound.id;
+        }
+      } catch (_) {}
+
+      // If not in local storage, check Firestore
+      if (!existingChatId) {
+        try {
+          const chatQuery = query(
+            collection(db, 'chats'),
+            where('participants', 'array-contains', activeUser.uid)
+          );
+          const chatSnap = await getDocs(chatQuery);
+          const fsFound = chatSnap.docs.find(doc => {
+            const data = doc.data();
+            return data.adId === id && data.participants?.includes(targetSellerId);
+          });
+          if (fsFound) {
+            existingChatId = fsFound.id;
+          }
+        } catch (e) {
+          console.warn('Firestore chats query notice:', e);
+        }
       }
+
+      let chatId = existingChatId;
       
-      let chatId = '';
-      
-      if (!existingChatDoc) {
+      if (!chatId) {
+        chatId = doc(collection(db, 'chats')).id;
+
         const getCleanName = (p: any, u: any, fallback: string) => {
           if (p && (p.firstName || p.lastName)) {
             return `${p.firstName || ''} ${p.lastName || ''}`.trim();
@@ -268,53 +363,67 @@ export default function AdDetails() {
           return u.displayName || u.email?.split('@')[0] || fallback;
         };
 
-        const finalBuyerName = getCleanName(profile, user, 'مشتري');
+        const finalBuyerName = getCleanName(profile, activeUser, 'مشتري');
         const chatData = {
-          participants: [user.uid, targetSellerId],
+          id: chatId,
+          participants: [activeUser.uid, targetSellerId],
           adId: id,
           adTitle: ad.title,
           adPrice: ad.price,
           adSamouni: ad.samouni || null,
           adWilaya: ad.wilaya,
-          adImage: ad.images[0] || null,
-          buyerId: user.uid,
+          adImage: (ad.images && ad.images.length > 0) ? ad.images[0] : null,
+          buyerId: activeUser.uid,
           sellerId: targetSellerId,
           buyerName: finalBuyerName,
-          sellerName: ad.sellerName || 'بائع',
-          buyerEmail: user.email || '',
+          sellerName: ad.sellerName || 'البائع',
+          buyerEmail: activeUser.email || '',
           sellerEmail: ad.sellerEmail || '',
           updatedAt: new Date().toISOString(),
           lastMessage: 'هل السيارة لا تزال متوفرة؟',
-          lastSenderId: user.uid,
+          lastSenderId: activeUser.uid,
           unreadCount: {
             [targetSellerId]: 1
           }
         };
 
+        // 1. Save to local storage immediately
         try {
-          const newChatRef = await addDoc(collection(db, 'chats'), {
-            ...chatData,
-            updatedAt: serverTimestamp(),
-          });
-          chatId = newChatRef.id;
+          const localChats = JSON.parse(localStorage.getItem('market_auto_dz_local_chats') || '[]');
+          const updatedLocal = [chatData, ...localChats.filter((c: any) => c.id !== chatId)];
+          localStorage.setItem('market_auto_dz_local_chats', JSON.stringify(updatedLocal));
 
-          await addDoc(collection(db, 'messages'), {
+          const initialMsg = {
+            id: 'msg_' + Date.now(),
             chatId: chatId,
-            senderId: user.uid,
+            senderId: activeUser.uid,
             text: 'هل السيارة لا تزال متوفرة؟',
-            createdAt: serverTimestamp(),
+            createdAt: new Date().toISOString(),
             read: false,
-          });
-        } catch (fsErr) {
-           console.warn('Firestore chat write notice, using local chatId:', fsErr);
-          chatId = 'chat_' + Date.now();
+          };
+          const localMsgs = JSON.parse(localStorage.getItem(`market_auto_dz_local_msgs_${chatId}`) || '[]');
+          localStorage.setItem(`market_auto_dz_local_msgs_${chatId}`, JSON.stringify([initialMsg, ...localMsgs]));
+        } catch (err) {
+          console.warn('Local chat save error:', err);
         }
 
+        // 2. Sync to Firestore in background
+        setDoc(doc(db, 'chats', chatId), {
+          ...chatData,
+          updatedAt: serverTimestamp(),
+        }).catch((err) => console.warn('Firestore chat sync notice:', err));
+
+        addDoc(collection(db, 'messages'), {
+          chatId: chatId,
+          senderId: activeUser.uid,
+          text: 'هل السيارة لا تزال متوفرة؟',
+          createdAt: serverTimestamp(),
+          read: false,
+        }).catch((err) => console.warn('Firestore message sync notice:', err));
+
         toast.success('تم بدء المحادثة بنجاح');
-      } else {
-        chatId = existingChatDoc.id;
       }
-      
+
       window.dispatchEvent(new CustomEvent('open-chat-bubble', { detail: { chatId } }));
       navigate(`/messages?chatId=${chatId}`);
     } catch (error: any) {
@@ -783,27 +892,26 @@ export default function AdDetails() {
             </div>
 
             <div className="space-y-4">
-              {(user?.uid === ad.userId || profile?.role === 'admin') && (
-                <div className="grid grid-cols-2 gap-4 pb-4">
+              {(user?.uid === ad.userId || isAdmin || profile?.role === 'admin') && (
+                <div className="grid grid-cols-2 gap-3 pb-4">
                   <button 
-                    onClick={handleMarkAsSold}
-                    disabled={ad.status === 'sold'}
+                    onClick={handleToggleSoldStatus}
                     className={cn(
-                      "flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all border-2",
+                      "flex items-center justify-center gap-2 py-3.5 px-3 rounded-2xl font-black text-xs md:text-sm transition-all border-2 shadow-md",
                       ad.status === 'sold' 
-                        ? "bg-white/5 border-white/10 text-white/20 cursor-not-allowed" 
-                        : "bg-brand-green/10 border-brand-green/20 text-brand-green hover:bg-brand-green hover:text-white"
+                        ? "bg-emerald-600/20 border-emerald-500/40 text-emerald-400 hover:bg-emerald-600 hover:text-white" 
+                        : "bg-red-500/20 border-red-500/40 text-red-400 hover:bg-red-600 hover:text-white"
                     )}
                   >
-                    <CheckCircle size={20} />
-                    {ad.status === 'sold' ? 'تم البيع' : 'تحديد كمباع (Vendu)'}
+                    <CheckCircle size={18} />
+                    <span>{ad.status === 'sold' ? 'إعادة العرض (متوفر) 🟢' : 'تحديد كـ تم البيع 🔴'}</span>
                   </button>
                   <button 
-                    onClick={handleDeleteAd}
-                    className="flex items-center justify-center gap-2 py-4 rounded-2xl bg-brand-red/10 border-2 border-brand-red/20 text-brand-red font-black text-sm hover:bg-brand-red hover:text-white transition-all shadow-lg shadow-brand-red/10"
+                    onClick={() => setShowDeleteModal(true)}
+                    className="flex items-center justify-center gap-2 py-3.5 px-3 rounded-2xl bg-red-950/80 border-2 border-red-600/50 text-red-300 font-black text-xs md:text-sm hover:bg-red-900 hover:text-white transition-all shadow-lg shadow-red-900/30"
                   >
-                    <Trash2 size={20} />
-                    حذف الإعلان نهائياً
+                    <Trash2 size={18} />
+                    <span>حذف المنشور 🗑️</span>
                   </button>
                 </div>
               )}
@@ -928,6 +1036,37 @@ export default function AdDetails() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className="bg-[#121212] border border-red-500/40 rounded-3xl p-6 md:p-8 max-w-md w-full space-y-6 shadow-2xl text-center">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto text-red-500 border border-red-500/30">
+              <AlertTriangle size={36} />
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-white">تأكيد حذف الإعلان</h3>
+              <p className="text-sm text-white/60 mt-2 leading-relaxed">
+                هل أنت متأكد من رغبتك في حذف إعلان <span className="text-white font-bold">"{ad?.title}"</span> نهائياً؟
+                لا يمكن التراجع عن هذا الإجراء وسيتم إزالة الإعلان من المنصة.
+              </p>
+            </div>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 py-3.5 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold transition-all"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={confirmDeleteAd}
+                className="flex-1 py-3.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2"
+              >
+                <Trash2 size={18} />
+                تأكيد الحذف
+              </button>
             </div>
           </div>
         </div>

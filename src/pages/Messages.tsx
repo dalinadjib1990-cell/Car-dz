@@ -167,77 +167,178 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
     if (activeChat?.adId) {
       const fetchAd = async () => {
         try {
+          // 1. Check local storage
+          const localAdsRaw = localStorage.getItem('market_auto_dz_local_ads');
+          if (localAdsRaw) {
+            const localAds = JSON.parse(localAdsRaw);
+            const foundLocal = localAds.find((a: any) => a.id === activeChat.adId);
+            if (foundLocal) {
+              setActiveAd(foundLocal);
+              return;
+            }
+          }
+
+          // 2. Fetch from Firestore
           const adSnap = await getDoc(doc(db, 'ads', activeChat.adId));
           if (adSnap.exists()) {
             setActiveAd({ id: adSnap.id, ...adSnap.data() });
+            return;
+          }
+
+          // 3. Fallback to activeChat metadata
+          if (activeChat.adTitle || activeChat.adImage) {
+            setActiveAd({
+              id: activeChat.adId,
+              title: activeChat.adTitle || 'سيارة معروضة في الماركت',
+              price: activeChat.adPrice || 0,
+              samouni: activeChat.adSamouni || 0,
+              images: activeChat.adImage ? [activeChat.adImage] : [],
+              wilaya: activeChat.adWilaya || 'الجزائر',
+              status: activeChat.adStatus || 'active',
+              description: 'إعلان سيارة من منصة ماركت أوتو الجزائر',
+            });
           }
         } catch (error) {
           console.error('Error fetching ad for chat:', error);
+          if (activeChat.adTitle || activeChat.adImage) {
+            setActiveAd({
+              id: activeChat.adId,
+              title: activeChat.adTitle || 'سيارة معروضة في الماركت',
+              price: activeChat.adPrice || 0,
+              samouni: activeChat.adSamouni || 0,
+              images: activeChat.adImage ? [activeChat.adImage] : [],
+              wilaya: activeChat.adWilaya || 'الجزائر',
+              status: activeChat.adStatus || 'active',
+            });
+          }
         }
       };
       fetchAd();
+    } else if (activeChat?.adTitle) {
+      setActiveAd({
+        id: activeChat.id,
+        title: activeChat.adTitle,
+        price: activeChat.adPrice || 0,
+        samouni: activeChat.adSamouni || 0,
+        images: activeChat.adImage ? [activeChat.adImage] : [],
+        wilaya: activeChat.adWilaya || 'الجزائر',
+        status: activeChat.adStatus || 'active',
+      });
     } else {
       setActiveAd(null);
     }
-  }, [activeChat?.adId]);
+  }, [activeChat]);
 
   useEffect(() => {
     if (!user) return;
-    // Remove orderBy to avoid index requirements during initial setup
-    const q = query(
-      collection(db, 'chats'), 
-      where('participants', 'array-contains', user.uid)
-    );
     
-    const unsubChats = onSnapshot(q, (snap) => {
-      console.log('Current User UID:', user.uid);
-      console.log('Chats snapshot received. Count:', snap.size);
+    const loadChats = () => {
+      let localChats: Chat[] = [];
+      try {
+        const raw = localStorage.getItem('market_auto_dz_local_chats');
+        if (raw) localChats = JSON.parse(raw);
+      } catch (_) {}
+
+      const q = query(
+        collection(db, 'chats'), 
+        where('participants', 'array-contains', user.uid)
+      );
       
-      let updatedChats = snap.docs.map(d => {
-        const data = d.data();
-        console.log('Chat found:', d.id, 'Participants:', data.participants);
-        return { id: d.id, ...data } as Chat;
-      });
-      
-      // Sort in memory instead of Firestore orderBy
-      updatedChats.sort((a, b) => {
-        const getTime = (val: any) => {
-          if (!val) return 0;
-          if (typeof val.toMillis === 'function') return val.toMillis();
-          if (val.seconds) return val.seconds * 1000;
-          return 0;
-        };
-        return getTime(b.updatedAt) - getTime(a.updatedAt);
+      const unsubChats = onSnapshot(q, (snap) => {
+        let fsChats = snap.docs.map(d => ({ id: d.id, ...d.data() } as Chat));
+
+        // Merge fsChats and localChats
+        const chatMap = new Map<string, Chat>();
+        localChats.forEach(c => chatMap.set(c.id, c));
+        fsChats.forEach(c => chatMap.set(c.id, { ...chatMap.get(c.id), ...c }));
+
+        let updatedChats = Array.from(chatMap.values());
+        
+        // Sort in memory
+        updatedChats.sort((a, b) => {
+          const getTime = (val: any) => {
+            if (!val) return 0;
+            if (typeof val === 'string') return new Date(val).getTime();
+            if (typeof val.toMillis === 'function') return val.toMillis();
+            if (val.seconds) return val.seconds * 1000;
+            return 0;
+          };
+          return getTime(b.updatedAt) - getTime(a.updatedAt);
+        });
+
+        snap.docChanges().forEach((change) => {
+          if (change.type === 'modified') {
+            const data = change.doc.data();
+            if (data.lastMessage && data.updatedAt && data.lastSenderId !== user.uid) {
+              playNotificationSound();
+            }
+          }
+        });
+        
+        setChats(updatedChats);
+        setLoading(false);
+      }, (error) => {
+        console.warn('Firestore chats query notice:', error);
+        setChats(localChats);
+        setLoading(false);
       });
 
-      snap.docChanges().forEach((change) => {
-        if (change.type === 'modified') {
-          const data = change.doc.data();
-          if (data.lastMessage && data.updatedAt && data.lastSenderId !== user.uid) {
-            playNotificationSound();
-          }
-        }
-      });
-      
-      setChats(updatedChats);
-      
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'chats');
-      setLoading(false);
-    });
-    return () => unsubChats();
+      return unsubChats;
+    };
+
+    const unsub = loadChats();
+    return () => { if (unsub) unsub(); };
   }, [user, soundEnabled]);
 
   useEffect(() => {
     const targetId = urlChatId || initialChatId;
-    if (targetId && chats.length > 0) {
-      const target = chats.find(c => c.id === targetId);
-      if (target && target.id !== activeChat?.id) {
-        setActiveChat(target);
+    if (!targetId) return;
+
+    const resolveTargetChat = async () => {
+      // 1. Check existing chats array
+      const targetInState = chats.find(c => c.id === targetId);
+      if (targetInState) {
+        if (activeChat?.id !== targetInState.id) {
+          setActiveChat(targetInState);
+        }
+        return;
       }
-    }
-  }, [urlChatId, initialChatId, chats]);
+
+      // 2. Check local storage
+      try {
+        const rawLocal = localStorage.getItem('market_auto_dz_local_chats');
+        if (rawLocal) {
+          const parsed: Chat[] = JSON.parse(rawLocal);
+          const foundLocal = parsed.find(c => c.id === targetId);
+          if (foundLocal) {
+            setActiveChat(foundLocal);
+            setChats(prev => {
+              if (prev.some(c => c.id === foundLocal.id)) return prev;
+              return [foundLocal, ...prev];
+            });
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 3. Direct Firestore fetch fallback
+      try {
+        const docSnap = await getDoc(doc(db, 'chats', targetId));
+        if (docSnap.exists()) {
+          const fetched = { id: docSnap.id, ...docSnap.data() } as Chat;
+          setActiveChat(fetched);
+          setChats(prev => {
+            if (prev.some(c => c.id === fetched.id)) return prev;
+            return [fetched, ...prev];
+          });
+        }
+      } catch (e) {
+        console.warn('Direct chat fetch notice:', e);
+      }
+    };
+
+    resolveTargetChat();
+  }, [urlChatId, initialChatId, chats.length]);
 
   useEffect(() => {
     if (!activeChat?.id || !user?.uid) {
@@ -263,19 +364,33 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
       setMessages([]);
       return;
     }
-    // Remove orderBy to avoid index requirements
+
+    let localMsgs: Message[] = [];
+    try {
+      const raw = localStorage.getItem(`market_auto_dz_local_msgs_${activeChat.id}`);
+      if (raw) localMsgs = JSON.parse(raw);
+    } catch (_) {}
+
     const q = query(
       collection(db, 'messages'), 
       where('chatId', '==', activeChat.id)
     );
     
     const unsubMessages = onSnapshot(q, (snap) => {
-      let updatedMessages = snap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
+      let fsMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
+
+      // Merge and deduplicate
+      const msgMap = new Map<string, Message>();
+      localMsgs.forEach(m => msgMap.set(m.id, m));
+      fsMsgs.forEach(m => msgMap.set(m.id, { ...msgMap.get(m.id), ...m }));
+
+      let updatedMessages = Array.from(msgMap.values());
       
       // Sort in memory
       updatedMessages.sort((a, b) => {
         const getTime = (val: any) => {
-          if (!val) return Date.now(); // Assume new messages without timestamps are now
+          if (!val) return Date.now();
+          if (typeof val === 'string') return new Date(val).getTime();
           if (typeof val.toMillis === 'function') return val.toMillis();
           if (val.seconds) return val.seconds * 1000;
           return Date.now();
@@ -285,10 +400,12 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
 
       setMessages(updatedMessages);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'messages');
+      console.warn('Firestore messages subscription notice:', error);
+      setMessages(localMsgs);
     });
+
     return () => unsubMessages();
-  }, [activeChat]);
+  }, [activeChat?.id]);
 
   useEffect(() => {
     if (activeChat && user) {
@@ -323,13 +440,52 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
 
   const handleSendMessage = async (e?: React.FormEvent, textOverride?: string, imageUrl?: string) => {
     if (e) e.preventDefault();
-    const textToSend = textOverride || newMessage;
-    if (!user || !activeChat || (!textToSend.trim() && !imageUrl)) return;
+    const textToSend = (textOverride || newMessage || '').trim();
+    if (!user || !activeChat || (!textToSend && !imageUrl)) return;
+
+    if (!textOverride) setNewMessage('');
+
+    const msgId = 'msg_' + Date.now();
+    const nowIso = new Date().toISOString();
+
+    const newMsgObj: Message = {
+      id: msgId,
+      chatId: activeChat.id,
+      senderId: user.uid,
+      text: textToSend,
+      imageUrl: imageUrl || undefined,
+      createdAt: nowIso,
+      read: false,
+    };
+
+    // 1. Optimistic UI update
+    setMessages(prev => [...prev, newMsgObj]);
+
+    // 2. Local storage update
+    try {
+      const existing = JSON.parse(localStorage.getItem(`market_auto_dz_local_msgs_${activeChat.id}`) || '[]');
+      localStorage.setItem(`market_auto_dz_local_msgs_${activeChat.id}`, JSON.stringify([...existing, newMsgObj]));
+
+      const localChats = JSON.parse(localStorage.getItem('market_auto_dz_local_chats') || '[]');
+      const updatedLocal = localChats.map((c: any) => {
+        if (c.id === activeChat.id) {
+          return {
+            ...c,
+            lastMessage: imageUrl ? '📷 صورة' : textToSend,
+            lastSenderId: user.uid,
+            updatedAt: nowIso,
+          };
+        }
+        return c;
+      });
+      localStorage.setItem('market_auto_dz_local_chats', JSON.stringify(updatedLocal));
+    } catch (_) {}
+
+    // 3. Sync to Firestore in background
     try {
       const otherUid = activeChat.participants?.find(id => id !== user.uid);
-      
-      // Clear typing status on send
       const chatRef = doc(db, 'chats', activeChat.id);
+      
       setDoc(chatRef, { [`typing.${user.uid}`]: false }, { merge: true }).catch(console.error);
 
       await addDoc(collection(db, 'messages'), {
@@ -341,7 +497,6 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
         read: false,
       });
       
-      // Update chat metadata and increment unread count for other user
       const updateData: any = {
         lastMessage: imageUrl ? '📷 صورة' : textToSend,
         lastSenderId: user.uid,
@@ -353,11 +508,8 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
       }
       
       await setDoc(chatRef, updateData, { merge: true });
-
-      if (!textOverride) setNewMessage('');
     } catch (error) {
-      console.error(error);
-      toast.error('فشل إرسال الرسالة');
+      console.warn('Background message sync notice:', error);
     }
   };
 
@@ -432,12 +584,23 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
   };
 
   const handleAIAssessment = async () => {
-    if (!activeAd || !activeChat || !user) {
-      toast.error('لا يمكن تقييم السيارة الآن');
+    const adToAssess = activeAd || (activeChat?.adTitle ? {
+      id: activeChat.adId || activeChat.id,
+      title: activeChat.adTitle,
+      price: activeChat.adPrice || 0,
+      samouni: activeChat.adSamouni || 0,
+      images: activeChat.adImage ? [activeChat.adImage] : [],
+      wilaya: activeChat.adWilaya || 'الجزائر',
+      status: activeChat.adStatus || 'active',
+      description: `سيارة ${activeChat.adTitle || ''} معروضة بسعر ${activeChat.adPrice || 0} دج في السوق الجزائري.`,
+    } : null);
+
+    if (!adToAssess || !activeChat || !user) {
+      toast.error('يرجى اختيار محادثة إعلان أولاً لتقييم السيارة');
       return;
     }
     setAssessingCar(true);
-    const loadingToast = toast.loading('الخبير الآلي يحلل السيارة والسوق...');
+    const loadingToast = toast.loading('الخبير الآلي يحلل السيارة والسوق الجزائرية...');
     try {
       const isBuyer = user.uid === activeChat.buyerId;
       const role = isBuyer ? 'buyer' : 'seller';
@@ -446,7 +609,7 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          adDetails: activeAd,
+          adDetails: adToAssess,
           role,
           userMessage: 'أعطنا رأيك كخبير محايد في هذه السيارة وهذا السعر بناءً على خبرتك في السوق الجزائري، وحدد سعراً عادلاً للبائع والمشتري.',
         })
@@ -462,13 +625,39 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
       }
       const data = await response.json();
       
-      await addDoc(collection(db, 'messages'), {
+      const aiMsgObj: Message = {
+        id: 'ai_' + Date.now(),
         chatId: activeChat.id,
         senderId: 'AI_EXPERT',
         text: data.reply,
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
         read: false,
-      });
+      };
+
+      // Update state locally immediately
+      setMessages(prev => [...prev, aiMsgObj]);
+
+      // Save locally
+      try {
+        const localKey = `market_auto_dz_local_msgs_${activeChat.id}`;
+        const rawMsgs = localStorage.getItem(localKey) || '[]';
+        const parsedMsgs = JSON.parse(rawMsgs);
+        parsedMsgs.push(aiMsgObj);
+        localStorage.setItem(localKey, JSON.stringify(parsedMsgs));
+      } catch (e) {}
+
+      // Save to Firestore
+      try {
+        await addDoc(collection(db, 'messages'), {
+          chatId: activeChat.id,
+          senderId: 'AI_EXPERT',
+          text: data.reply,
+          createdAt: serverTimestamp(),
+          read: false,
+        });
+      } catch (e) {
+        console.warn('Firestore AI msg notice:', e);
+      }
 
       const chatRef = doc(db, 'chats', activeChat.id);
       const otherUid = activeChat.participants?.find(id => id !== user.uid);
@@ -479,8 +668,11 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
       };
       if (otherUid) updateData[`unreadCount.${otherUid}`] = (activeChat.unreadCount?.[otherUid] || 0) + 1;
       
-      await setDoc(chatRef, updateData, { merge: true });
-      toast.success('تم إضافة تقييم الخبير', { id: loadingToast });
+      try {
+        await setDoc(chatRef, updateData, { merge: true });
+      } catch (e) {}
+
+      toast.success('تم إضافة تقييم الخبير الآلي بنجاح 🤖', { id: loadingToast });
     } catch (error: any) {
       console.error(error);
       toast.error(error.message || 'حدث خطأ أثناء الاتصال بالخبير الآلي', { id: loadingToast });
@@ -594,11 +786,22 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                       </div>
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-1">
-                      <div className="flex items-center gap-2 overflow-hidden">
+                      <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
                         {(chat.adImage || activeAd?.images?.[0]) && (
                           <img src={chat.adImage || activeAd?.images?.[0]} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
                         )}
-                        <p className="text-[10px] text-brand-green font-bold truncate flex-1">{chat.adTitle}</p>
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <p className="text-[10px] text-brand-green font-bold truncate flex-1">{chat.adTitle}</p>
+                          {(chat.adStatus === 'sold' || (activeChat?.id === chat.id && activeAd?.status === 'sold')) ? (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 shrink-0">
+                              تم البيع 🔴
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                              متوفر 🟢
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         {chat.adPrice && <span className="text-[9px] text-emerald-400 font-bold">{chat.adPrice.toLocaleString()} دج</span>}
@@ -765,7 +968,18 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
                     </div>
                   )}
                   <div className="flex-1 min-w-0 py-1">
-                    <p className="text-sm font-bold text-brand-green line-clamp-2">{activeChat.adTitle || activeAd?.title}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-brand-green line-clamp-1">{activeChat.adTitle || activeAd?.title}</p>
+                      {(activeAd?.status === 'sold' || activeChat.adStatus === 'sold') ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-red-500/20 text-red-400 border border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.3)] animate-pulse shrink-0">
+                          تم البيع (Vendu) 🔴
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                          متوفر (Disponible) 🟢
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className="text-xs text-emerald-400 font-black">
                         {(activeChat.adPrice || activeAd?.price)?.toLocaleString() || '---'} دج

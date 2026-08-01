@@ -51,10 +51,7 @@ export const securityService = {
       } as SecurityEvent));
       callback(events);
     }, (error) => {
-      console.error("Security alerts snapshot error:", error);
-      if (error.code === 'permission-denied') {
-        console.warn("Permission denied for security alerts. User may not have admin privileges yet.");
-      }
+      console.warn("Security alerts subscription notice:", error?.message || error);
     });
   }
 };

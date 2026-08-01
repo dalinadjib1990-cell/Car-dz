@@ -84,6 +84,7 @@ export interface Chat {
   adSamouni?: number;
   adWilaya?: string;
   adImage?: string;
+  adStatus?: 'active' | 'sold';
   buyerId?: string;
   sellerId?: string;
   buyerName?: string;
