@@ -1,15 +1,81 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Car, User, LogOut, PlusSquare, MessageSquare, Search, Shield, Activity } from 'lucide-react';
-import { auth } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import MarketAnalysisPopup from './MarketAnalysisPopup';
 import { LineChart as LineChartIcon } from 'lucide-react';
+import { Chat } from '../types';
 
 export default function Header() {
   const { user, profile, isAdmin, logout } = useAuth();
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!user) {
+      setUnreadCount(0);
+      return;
+    }
+
+    let currentDocs: any[] = [];
+
+    const calculateTotalUnread = () => {
+      let total = 0;
+      const seenChatIds = new Set<string>();
+
+      currentDocs.forEach(doc => {
+        seenChatIds.add(doc.id);
+        const data = doc.data();
+        if (data.unreadCount && data.unreadCount[user.uid]) {
+          total += Number(data.unreadCount[user.uid]) || 0;
+        }
+      });
+
+      try {
+        const rawLocal = localStorage.getItem('market_auto_dz_local_chats');
+        if (rawLocal) {
+          const parsed: Chat[] = JSON.parse(rawLocal);
+          parsed.forEach(c => {
+            if (!seenChatIds.has(c.id)) {
+              if (c.unreadCount && c.unreadCount[user.uid]) {
+                total += Number(c.unreadCount[user.uid]) || 0;
+              }
+            }
+          });
+        }
+      } catch (e) {}
+
+      setUnreadCount(total);
+    };
+
+    const q = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      currentDocs = snapshot.docs;
+      calculateTotalUnread();
+    }, () => {
+      calculateTotalUnread();
+    });
+
+    const handleLocalUpdate = () => {
+      calculateTotalUnread();
+    };
+
+    window.addEventListener('storage', handleLocalUpdate);
+    window.addEventListener('local-chats-updated', handleLocalUpdate);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('storage', handleLocalUpdate);
+      window.removeEventListener('local-chats-updated', handleLocalUpdate);
+    };
+  }, [user]);
 
   const handleLogout = async () => {
     await logout();
@@ -58,7 +124,9 @@ export default function Header() {
             <>
               <button onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('open-chat-bubble')); }} className="p-2 hover:bg-white/5 rounded-full transition-colors relative hidden xs:flex">
                 <MessageSquare size={20} />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-brand-red rounded-full"></span>
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-brand-red rounded-full animate-pulse"></span>
+                )}
               </button>
               {isAdmin && (
                 <Link to="/admin" className="flex items-center gap-2 px-3 py-2 bg-brand-green/10 text-brand-green rounded-xl text-[10px] sm:text-xs font-black border border-brand-green/20 hover:bg-brand-green hover:text-white transition-all shadow-lg shadow-brand-green/5">

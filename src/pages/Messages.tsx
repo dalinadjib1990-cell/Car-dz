@@ -418,19 +418,61 @@ export default function Messages({ isWidget = false, initialChatId }: { isWidget
 
   useEffect(() => {
     if (activeChat && user) {
-      // Clear unread count for current user
+      // 1. Clear unread count for current user in Firestore
       const chatRef = doc(db, 'chats', activeChat.id);
       setDoc(chatRef, {
         [`unreadCount.${user.uid}`]: 0
       }, { merge: true }).catch(console.error);
 
-      // Mark messages as read
+      // 2. Immediately update local React state for activeChat and chats list
+      if (activeChat.unreadCount?.[user.uid]) {
+        setActiveChat(prev => prev ? {
+          ...prev,
+          unreadCount: { ...(prev.unreadCount || {}), [user.uid]: 0 }
+        } : prev);
+      }
+
+      setChats(prev => prev.map(c => {
+        if (c.id === activeChat.id && c.unreadCount?.[user.uid]) {
+          return {
+            ...c,
+            unreadCount: { ...(c.unreadCount || {}), [user.uid]: 0 }
+          };
+        }
+        return c;
+      }));
+
+      // 3. Update localStorage and dispatch event for floating bubble / header
+      try {
+        const rawLocal = localStorage.getItem('market_auto_dz_local_chats');
+        if (rawLocal) {
+          const parsed: Chat[] = JSON.parse(rawLocal);
+          let updated = false;
+          const newParsed = parsed.map(c => {
+            if (c.id === activeChat.id && c.unreadCount?.[user.uid]) {
+              updated = true;
+              return {
+                ...c,
+                unreadCount: { ...(c.unreadCount || {}), [user.uid]: 0 }
+              };
+            }
+            return c;
+          });
+          if (updated) {
+            localStorage.setItem('market_auto_dz_local_chats', JSON.stringify(newParsed));
+          }
+        }
+      } catch (e) {}
+
+      window.dispatchEvent(new Event('local-chats-updated'));
+
+      // 4. Mark messages as read
       const unreadMessages = messages.filter(m => m.senderId !== user.uid && !m.read);
       unreadMessages.forEach(m => {
         setDoc(doc(db, 'messages', m.id), { read: true }, { merge: true }).catch(console.error);
       });
     }
-  }, [activeChat, user, messages.length]);
+  }, [activeChat?.id, user?.uid, messages.length]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;

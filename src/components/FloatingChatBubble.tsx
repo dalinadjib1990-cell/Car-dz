@@ -6,6 +6,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useLocation } from 'react-router-dom';
 import { cn } from '../lib/utils';
+import { Chat } from '../types';
 import Messages from '../pages/Messages';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
@@ -70,7 +71,41 @@ export default function FloatingChatBubble() {
   }, [aiMessages, activeTab]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setUnreadCount(0);
+      return;
+    }
+
+    let currentDocs: any[] = [];
+
+    const calculateTotalUnread = () => {
+      let total = 0;
+      const seenChatIds = new Set<string>();
+
+      currentDocs.forEach(doc => {
+        seenChatIds.add(doc.id);
+        const data = doc.data();
+        if (data.unreadCount && data.unreadCount[user.uid]) {
+          total += Number(data.unreadCount[user.uid]) || 0;
+        }
+      });
+
+      try {
+        const rawLocal = localStorage.getItem('market_auto_dz_local_chats');
+        if (rawLocal) {
+          const parsed: Chat[] = JSON.parse(rawLocal);
+          parsed.forEach(c => {
+            if (!seenChatIds.has(c.id)) {
+              if (c.unreadCount && c.unreadCount[user.uid]) {
+                total += Number(c.unreadCount[user.uid]) || 0;
+              }
+            }
+          });
+        }
+      } catch (e) {}
+
+      setUnreadCount(total);
+    };
 
     const q = query(
       collection(db, 'chats'),
@@ -78,21 +113,27 @@ export default function FloatingChatBubble() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      let total = 0;
-      snapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.unreadCount && data.unreadCount[user.uid]) {
-          total += data.unreadCount[user.uid];
-        }
-      });
-      setUnreadCount(total);
+      currentDocs = snapshot.docs;
+      calculateTotalUnread();
     }, (error) => {
       if (error.code !== 'permission-denied') {
         console.error("FloatingChatBubble listener error:", error);
       }
+      calculateTotalUnread();
     });
 
-    return () => unsubscribe();
+    const handleLocalUpdate = () => {
+      calculateTotalUnread();
+    };
+
+    window.addEventListener('storage', handleLocalUpdate);
+    window.addEventListener('local-chats-updated', handleLocalUpdate);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('storage', handleLocalUpdate);
+      window.removeEventListener('local-chats-updated', handleLocalUpdate);
+    };
   }, [user]);
 
   const handleSendAIMessage = async (textToSend?: string) => {
