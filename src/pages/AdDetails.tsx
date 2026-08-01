@@ -392,7 +392,23 @@ export default function AdDetails() {
                 </div>
                 <div className="flex items-center gap-4 text-white/40 text-sm justify-end">
                   <span className="flex items-center gap-1"><Zap size={14} /> {ad.views} مشاهدة</span>
-                  <span className="flex items-center gap-1"><Calendar size={14} /> {ad.createdAt?.toDate().toLocaleDateString('fr-FR')}</span>
+                  <span className="flex items-center gap-1">
+                    <Calendar size={14} /> 
+                    {(() => {
+                      if (!ad.createdAt) return 'الآن';
+                      try {
+                        if (typeof (ad.createdAt as any)?.toDate === 'function') {
+                          return (ad.createdAt as any).toDate().toLocaleDateString('fr-FR');
+                        }
+                        if ((ad.createdAt as any)?.seconds) {
+                          return new Date((ad.createdAt as any).seconds * 1000).toLocaleDateString('fr-FR');
+                        }
+                        return new Date(ad.createdAt as any).toLocaleDateString('fr-FR');
+                      } catch (_) {
+                        return 'الآن';
+                      }
+                    })()}
+                  </span>
                   <span className="flex items-center gap-1"><MapPin size={14} /> {ad.wilaya}</span>
                 </div>
               </div>
