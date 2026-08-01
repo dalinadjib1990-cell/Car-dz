@@ -7,13 +7,13 @@ import MarketAnalysisPopup from './MarketAnalysisPopup';
 import { LineChart as LineChartIcon } from 'lucide-react';
 
 export default function Header() {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, logout } = useAuth();
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
-    await auth.signOut();
-    navigate('/');
+    await logout();
+    navigate('/login');
   };
 
   return (

@@ -8,7 +8,7 @@ import { User, Mail, Phone, MapPin, Camera, Loader2, CheckCircle2, LogOut, Shiel
 import { toast } from 'sonner';
 
 export default function Profile() {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -31,9 +31,9 @@ export default function Profile() {
 
   const handleLogout = async () => {
     try {
-      await auth.signOut();
-      navigate('/');
+      await logout();
       toast.success('تم تسجيل الخروج بنجاح');
+      navigate('/login');
     } catch (error) {
       toast.error('فشل تسجيل الخروج');
     }

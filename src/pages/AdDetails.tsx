@@ -21,14 +21,24 @@ import MarketAnalysisPopup from '../components/MarketAnalysisPopup';
 import Markdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 
+const getLocalAdById = (targetId?: string): Ad | null => {
+  if (!targetId) return null;
+  try {
+    const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+    const found = localAds.find(a => a.id === targetId);
+    if (found) return found;
+  } catch (_) {}
+  return null;
+};
+
 export default function AdDetails() {
   const { id } = useParams();
   const { user, profile } = useAuth();
   const navigate = useNavigate();
-  const [ad, setAd] = useState<Ad | null>(null);
+  const [ad, setAd] = useState<Ad | null>(() => getLocalAdById(id));
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !getLocalAdById(id));
   const [currentImage, setCurrentImage] = useState(0);
   const [showPhone, setShowPhone] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -40,34 +50,44 @@ export default function AdDetails() {
 
   useEffect(() => {
     if (!id) return;
+
+    // Check local storage immediately for fast zero-delay rendering
+    const cachedAd = getLocalAdById(id);
+    if (cachedAd) {
+      setAd(cachedAd);
+      setLoading(false);
+    }
+
     const fetchAd = async () => {
-      if (!id) return;
       try {
-        const docSnap = await getDoc(doc(db, 'ads', id));
-        if (docSnap.exists()) {
-          setAd({ id: docSnap.id, ...docSnap.data() } as Ad);
+        const docRef = doc(db, 'ads', id);
+        const docSnapPromise = getDoc(docRef);
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+        
+        const res = await Promise.race([docSnapPromise, timeoutPromise]);
+        if (res && res.exists()) {
+          setAd({ id: res.id, ...res.data() } as Ad);
           setLoading(false);
-          return;
+        } else if (!cachedAd) {
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            setAd({ id: snap.id, ...snap.data() } as Ad);
+          } else {
+            toast.error('الإعلان غير موجود');
+            navigate('/');
+          }
+          setLoading(false);
         }
       } catch (error) {
         console.warn('Firestore fetch ad notice:', error);
-      }
-
-      // Check local storage fallback
-      try {
-        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        const found = localAds.find(a => a.id === id);
-        if (found) {
-          setAd(found);
-          setLoading(false);
-          return;
+        if (!cachedAd) {
+          toast.error('تعذر تحميل بيانات الإعلان');
+          navigate('/');
         }
-      } catch (_) {}
-
-      toast.error('الإعلان غير موجود');
-      navigate('/');
-      setLoading(false);
+        setLoading(false);
+      }
     };
+
     fetchAd();
 
     const q = query(collection(db, 'comments'), where('adId', '==', id));
@@ -737,14 +757,24 @@ export default function AdDetails() {
                 </div>
               )}
 
-              {ad.showPhone ? (
-                <button 
-                  onClick={() => setShowPhone(!showPhone)}
-                  className="w-full btn-primary flex items-center justify-center gap-3"
-                >
-                  <Phone size={20} />
-                  {showPhone ? ad.sellerPhone : 'إظهار رقم الهاتف'}
-                </button>
+              {ad.showPhone !== false && (ad.sellerPhone || '0771167330') ? (
+                showPhone ? (
+                  <a 
+                    href={`tel:${ad.sellerPhone || '0771167330'}`}
+                    className="w-full py-4 bg-brand-green hover:bg-brand-green/90 text-white rounded-xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg shadow-brand-green/20"
+                  >
+                    <Phone size={20} className="animate-bounce" />
+                    <span>اتصل الآن: {ad.sellerPhone || '0771167330'}</span>
+                  </a>
+                ) : (
+                  <button 
+                    onClick={() => setShowPhone(true)}
+                    className="w-full btn-primary flex items-center justify-center gap-3"
+                  >
+                    <Phone size={20} />
+                    <span>إظهار رقم الهاتف ({ad.sellerPhone ? `${ad.sellerPhone.substring(0, 4)}...` : '0771...'})</span>
+                  </button>
+                )
               ) : (
                 <button 
                   disabled

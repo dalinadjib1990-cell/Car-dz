@@ -42,12 +42,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    localStorage.removeItem(LOCAL_SESSION_KEY);
-    setUser(null);
-    setProfile(null);
     try {
+      localStorage.removeItem(LOCAL_SESSION_KEY);
+      localStorage.removeItem('market_auto_dz_user_session');
+      sessionStorage.clear();
+      setUser(null);
+      setProfile(null);
       await firebaseSignOut(auth);
-    } catch (_) {}
+    } catch (err) {
+      console.warn('Signout error fallback:', err);
+      setUser(null);
+      setProfile(null);
+    }
   };
 
   useEffect(() => {
