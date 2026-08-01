@@ -209,32 +209,27 @@ export default function PostAd() {
       };
 
       // 1. Save to local storage immediately
+      const newLocalAd = {
+        ...adPayload,
+        id: 'ad_' + Date.now(),
+        createdAt: new Date().toISOString()
+      };
+
       try {
         const localAds = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
-        const newLocalAd = {
-          ...adPayload,
-          id: 'ad_' + Date.now(),
-          createdAt: new Date().toISOString()
-        };
         localAds.unshift(newLocalAd);
         localStorage.setItem('market_auto_dz_local_ads', JSON.stringify(localAds));
       } catch (err) {
         console.warn('LocalStorage save error:', err);
       }
 
-      // 2. Save to Firestore asynchronously
-      try {
-        const addPromise = addDoc(collection(db, 'ads'), {
-          ...adPayload,
-          createdAt: serverTimestamp(),
-        });
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('TIMEOUT')), 4000)
-        );
-        await Promise.race([addPromise, timeoutPromise]);
-      } catch (fsErr) {
+      // 2. Sync to Firestore in background without blocking navigation
+      addDoc(collection(db, 'ads'), {
+        ...adPayload,
+        createdAt: new Date().toISOString(),
+      }).catch((fsErr) => {
         console.warn('Firestore sync background notice:', fsErr);
-      }
+      });
 
       // Clear draft on successful submit
       localStorage.removeItem('market_auto_dz_ad_draft');
@@ -242,11 +237,7 @@ export default function PostAd() {
       navigate('/');
     } catch (error: any) {
       console.error(error);
-      if (error?.message === 'TIMEOUT') {
-        toast.error('استغرقت الاستجابة وقتاً طويلاً. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة');
-      } else {
-        toast.error('حدث خطأ أثناء نشر الإعلان: ' + (error?.message || 'خطأ في الخادم'));
-      }
+      toast.error('حدث خطأ أثناء نشر الإعلان: ' + (error?.message || 'خطأ غير متوقع'));
     } finally {
       setLoading(false);
     }

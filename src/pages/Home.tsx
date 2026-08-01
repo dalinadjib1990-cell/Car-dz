@@ -14,19 +14,29 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'ads'), orderBy('createdAt', 'desc'), limit(12));
     const timer = setTimeout(() => {
       setLoading(false);
-    }, 2000);
+    }, 1500);
 
-    const unsubscribe = onSnapshot(q, (snap) => {
+    const unsubscribe = onSnapshot(collection(db, 'ads'), (snap) => {
       clearTimeout(timer);
       const fsAds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
       try {
         const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
         const fsIds = new Set(fsAds.map(a => a.id));
         const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
-        setLatestAds([...filteredLocal, ...fsAds]);
+        
+        const combined = [...filteredLocal, ...fsAds].sort((a, b) => {
+          const getTimestamp = (val: any) => {
+            if (!val) return 0;
+            if (val.seconds) return val.seconds * 1000;
+            const parsed = new Date(val).getTime();
+            return isNaN(parsed) ? 0 : parsed;
+          };
+          return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
+        });
+
+        setLatestAds(combined);
       } catch (_) {
         setLatestAds(fsAds);
       }

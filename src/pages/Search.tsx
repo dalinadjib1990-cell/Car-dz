@@ -26,28 +26,53 @@ export default function Search() {
   const maxYear = searchParams.get('maxYear') || '';
 
   useEffect(() => {
-    let baseQuery = query(collection(db, 'ads'), orderBy('createdAt', 'desc'));
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
 
-    if (brandParam) {
-      baseQuery = query(baseQuery, where('brand', '==', brandParam));
-    }
-    if (wilayaParam) {
-      baseQuery = query(baseQuery, where('wilaya', '==', wilayaParam));
-    }
-    if (fuelType) {
-      baseQuery = query(baseQuery, where('fuelType', '==', fuelType));
-    }
+    const unsubscribe = onSnapshot(collection(db, 'ads'), (snap) => {
+      clearTimeout(timer);
+      const fsAds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
+      
+      let allAds = [...fsAds];
+      try {
+        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const fsIds = new Set(fsAds.map(a => a.id));
+        const filteredLocal = localAds.filter(l => !fsIds.has(l.id));
+        allAds = [...filteredLocal, ...fsAds];
+      } catch (_) {}
 
-    const unsubscribe = onSnapshot(baseQuery, (snap) => {
-      let results = snap.docs.map(d => ({ id: d.id, ...d.data() } as Ad));
+      // Sort by newest
+      allAds.sort((a, b) => {
+        const getTimestamp = (val: any) => {
+          if (!val) return 0;
+          if (val.seconds) return val.seconds * 1000;
+          const parsed = new Date(val).getTime();
+          return isNaN(parsed) ? 0 : parsed;
+        };
+        return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
+      });
+
+      let results = allAds;
+
+      if (brandParam) {
+        results = results.filter(ad => ad.brand?.toLowerCase() === brandParam.toLowerCase());
+      }
+      if (wilayaParam) {
+        results = results.filter(ad => ad.wilaya === wilayaParam);
+      }
+      if (fuelType) {
+        results = results.filter(ad => ad.fuelType === fuelType);
+      }
       
       // Client-side filtering for ranges and text search
       if (qParam) {
         const lowQ = qParam.toLowerCase();
         results = results.filter(ad => 
-          ad.title.toLowerCase().includes(lowQ) || 
-          ad.description.toLowerCase().includes(lowQ) ||
-          ad.model.toLowerCase().includes(lowQ)
+          ad.title?.toLowerCase().includes(lowQ) || 
+          ad.description?.toLowerCase().includes(lowQ) ||
+          ad.model?.toLowerCase().includes(lowQ) ||
+          ad.brand?.toLowerCase().includes(lowQ)
         );
       }
 
@@ -56,15 +81,12 @@ export default function Search() {
       
       // Price Range Filtering (in Millions)
       if (priceRange) {
-        const [min, max] = priceRange.split('-').map(v => Number(v) * 10000); // Convert Million to actual price (assuming price is in 1000s or similar, but user said 20 million, usually 200,000,000 in DZ context or 2,000,000? Actually 1 Million = 10,000 DA in some contexts, or 1,000,000 DA. In Algeria 1 Million = 10,000 DA. So 20 Million = 200,000 DA.)
-        // Let's assume price in DB is in DA.
-        // 1 Million Centimes = 10,000 DA.
-        // 20 Million Centimes = 200,000 DA.
         const factor = 10000;
+        const [min, max] = priceRange.split('-').map(Number);
         if (max) {
-          results = results.filter(ad => ad.price >= Number(min) * factor && ad.price <= Number(max) * factor);
+          results = results.filter(ad => ad.price >= min * factor && ad.price <= max * factor);
         } else {
-          results = results.filter(ad => ad.price >= Number(min) * factor);
+          results = results.filter(ad => ad.price >= min * factor);
         }
       }
 
@@ -85,9 +107,19 @@ export default function Search() {
 
       setAds(results);
       setLoading(false);
+    }, (err) => {
+      console.warn('Firestore search notice:', err);
+      try {
+        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        setAds(localAds);
+      } catch (_) {}
+      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, [qParam, brandParam, wilayaParam, minPrice, maxPrice, priceRange, mileageRange, fuelType, minYear, maxYear]);
 
   return (

@@ -46,15 +46,27 @@ export default function AdDetails() {
         const docSnap = await getDoc(doc(db, 'ads', id));
         if (docSnap.exists()) {
           setAd({ id: docSnap.id, ...docSnap.data() } as Ad);
-        } else {
-          toast.error('الإعلان غير موجود');
-          navigate('/');
+          setLoading(false);
+          return;
         }
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, `ads/${id}`);
-      } finally {
-        setLoading(false);
+        console.warn('Firestore fetch ad notice:', error);
       }
+
+      // Check local storage fallback
+      try {
+        const localAds: Ad[] = JSON.parse(localStorage.getItem('market_auto_dz_local_ads') || '[]');
+        const found = localAds.find(a => a.id === id);
+        if (found) {
+          setAd(found);
+          setLoading(false);
+          return;
+        }
+      } catch (_) {}
+
+      toast.error('الإعلان غير موجود');
+      navigate('/');
+      setLoading(false);
     };
     fetchAd();
 
