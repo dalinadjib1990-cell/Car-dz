@@ -50,10 +50,12 @@ export default function Login() {
       }
       navigate('/');
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         toast.error('البريد الإلكتروني/رقم الهاتف أو كلمة المرور غير صحيحة');
       } else if (error.code === 'auth/email-already-in-use') {
         toast.error('هذا البريد الإلكتروني أو رقم الهاتف مستخدم بالفعل');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        toast.error('يرجى تفعيل خيار (Email/Password) من لوحة تحكم Firebase Console -> Authentication -> Sign-in method');
       } else {
         toast.error(error.message || 'حدث خطأ ما');
       }

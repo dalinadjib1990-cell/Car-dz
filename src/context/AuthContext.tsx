@@ -25,7 +25,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Safety fallback timeout (1.8s max) to prevent blocking screen on slow mobile networks (3G/4G)
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 1800);
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      clearTimeout(timer);
       setUser(u);
       
       if (u) {
@@ -35,9 +41,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const isMaster = userEmail === masterEmail;
           
           const docRef = doc(db, 'users', u.uid);
-          const docSnap = await getDoc(docRef);
+          // Set a fast race timeout on Firestore profile fetch
+          const docSnap = await Promise.race([
+            getDoc(docRef),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+          ]);
           
-          if (docSnap.exists()) {
+          if (docSnap && docSnap.exists()) {
             const data = docSnap.data();
             if (isMaster && data.role !== 'admin') {
               await updateDoc(docRef, { role: 'admin' });
@@ -57,7 +67,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role: isMaster ? 'admin' : 'user',
               createdAt: serverTimestamp(),
             };
-            await setDoc(docRef, newProfile);
+            if (docSnap !== null) {
+              await setDoc(docRef, newProfile);
+            }
             setProfile(newProfile);
           }
         } catch (error) {
@@ -69,7 +81,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   const isAdmin = profile?.role === 'admin' || user?.email?.toLowerCase().trim() === "dalinadjib1990@gmail.com";
