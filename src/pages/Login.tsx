@@ -23,45 +23,68 @@ export default function Login() {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim().replace(/\s+/g, '');
+    const authEmail = cleanEmail || (cleanPhone ? `${cleanPhone}@marketautodz.com` : '');
+
+    if (!authEmail) {
+      toast.error('يرجى أدخال البريد الإلكتروني أو رقم الهاتف');
+      setLoading(false);
+      return;
+    }
+
     try {
       try {
         setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence).catch(() => {});
       } catch (_) {
         // Non-blocking persistence call
       }
+
+      // 10-second max timeout helper so login button never gets stuck in loading state
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 10000)
+      );
       
       if (isRegister) {
-        // If user provided phone but no email, we create a dummy email for Firebase Auth
-        const authEmail = email || `${phone}@marketautodz.com`;
-        const result = await createUserWithEmailAndPassword(auth, authEmail, password);
+        const result = (await Promise.race([
+          createUserWithEmailAndPassword(auth, authEmail, password),
+          timeoutPromise
+        ])) as any;
+
         const user = result.user;
         
-        await setDoc(doc(db, 'users', user.uid), {
+        // Save profile in background with timeout
+        setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
-          email: email || '',
-          phone,
-          firstName,
-          lastName,
+          email: cleanEmail || '',
+          phone: cleanPhone,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
           wilaya,
           createdAt: serverTimestamp(),
-        });
+        }).catch(() => {});
         
         toast.success('تم إنشاء الحساب بنجاح');
       } else {
-        const authEmail = email || `${phone}@marketautodz.com`;
-        await signInWithEmailAndPassword(auth, authEmail, password);
+        await Promise.race([
+          signInWithEmailAndPassword(auth, authEmail, password),
+          timeoutPromise
+        ]);
         toast.success('تم تسجيل الدخول بنجاح');
       }
       navigate('/');
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+      if (error.message === 'TIMEOUT') {
+        toast.error('استغرقت الاستجابة وقتاً طويلاً. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة');
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         toast.error('البريد الإلكتروني/رقم الهاتف أو كلمة المرور غير صحيحة');
       } else if (error.code === 'auth/email-already-in-use') {
         toast.error('هذا البريد الإلكتروني أو رقم الهاتف مستخدم بالفعل');
       } else if (error.code === 'auth/operation-not-allowed') {
         toast.error('يرجى تفعيل خيار (Email/Password) من لوحة تحكم Firebase Console -> Authentication -> Sign-in method');
       } else {
-        toast.error(error.message || 'حدث خطأ ما');
+        toast.error(error.message || 'حدث خطأ أثناء الاتصال بالخادم');
       }
     } finally {
       setLoading(false);
