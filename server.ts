@@ -288,61 +288,143 @@ ${userMessage}
       let lastError = null;
       const { adDetails, marketData } = req.body;
       
-      const systemInstruction = `أنت خبير جزائري محترف متخصص في تحليل سوق السيارات بالجزائر (Market Auto DZ AI Analyst). عليك أن تستمد معلوماتك عن السوق جزئيا من البيانات الخارجية المتاحة لك من خلال معرفتك المسبقة وتكون على اطلاع دائم بالسوق الجزائري (العاصمة، سطيف، وهران، قسنطينة، باتنة، إلخ).
-مهمتك هي تحليل الإعلان وتزويد المواطن الجزائري بتحليل مفصل، دقيق وسهل الفهم يوضح ماذا يعني السعر العادل ومعدل الأسعار في مختلف الولايات (خوصوصاً سطيف والعاصمة).
-يجب أن ترد بصيغة JSON فقط، بدون أي نصوص إضافية، وفقاً للهيكل التالي بالضبط:
+      const systemInstruction = `أنت كبير الخبراء والمحللين الاقتصاديين المتخصصين في سوق السيارات بالجزائر (Market Auto DZ Chief Auto Market Analyst).
+تعتمد في تحليلك على الواقع الفعلي للجزائر:
+- مواعيد وأسواق السيارات الأسبوعية الحية (سوق السبت تيجلابين ببومرداس، سوق الثلاثاء عين أرنات بسطيف، سوق الخميس بباتنة، سوق الأربعاء بشلغوم العيد، وسوق وهران وقسنطينة).
+- مستجدات استيراد السيارات ورخص الوكلاء، وحصص كوطة الاستيراد (سيارات أقل من 3 سنوات، وعلامات شيري، جيلي، ديبال، بيستون...).
+- مصانع التجميع والتصنيع المحلي (مصنع فيات Fiat بطفراوي وهران وتوسيع طاقته، خطوط تجميع شيري وجيلي وبايك).
+- نبض وتفاعل منصات التواصل الاجتماعي (مجموعات الفيسبوك، تيك توك، مقاطع أسواق السيارات الحية، وسلوك المشترين والوسطاء "السماسرة").
+- قانون العرض والطلب الحقيقي والسيولة النقدية وتفاوض "السعر المعاود/المصبوغ" مقابل "السيارة النظيفة بدون صباغة".
+
+مهمتك تزويد المستخدم بتحليل استخباراتي دقيق، واقعي وشامل يتضمن:
+1. تذبذب الأسعار اليومي (Daily Fluctuation) على مدار الأيام الماضية والحالية مع ذكر دلالات أسواق الأسبوع.
+2. توقعات واضحة وقاطعة:
+   - توقعات الأسبوع القادم (Next Week).
+   - توقعات الشهر القادم (Next Month).
+   - توقعات الأشهر القادمة (3 إلى 6 أشهر).
+3. رادار الأخبار والقرارات المؤثرة (قوانين الاستيراد، فتح وتوسيع المصانع، ونبض السوشيال ميديا، وأخبار أسواق الولايات).
+4. تقييم السعر العادل (Fair Price) مقارنة بمعدلات سطيف، العاصمة، وهران، باتنة وغيرها.
+
+يجب أن ترد بصيغة JSON فقط، بدون أي نصوص إضافية، وفقاً للهيكل التالي:
 {
   "trendData": [
-    {"name": "قبل 6 أشهر", "price": 1900000},
-    {"name": "قبل 3 أشهر", "price": 1950000},
-    {"name": "الشهر الماضي", "price": 2000000},
-    {"name": "هذا الشهر", "price": 2050000}
+    {"name": "قبل 6 أشهر", "price": 2150000},
+    {"name": "قبل 3 أشهر", "price": 2080000},
+    {"name": "الشهر الماضي", "price": 2030000},
+    {"name": "هذا الشهر", "price": 2000000}
   ],
+  "dailyVolatilityData": [
+    {"day": "السبت (تيجلابين)", "date": "اليوم 1", "priceIndex": 2020000, "fluctuation": "+0.8%", "marketActivity": "Peak", "notes": "سيولة عالية وعروض قوية لسيارات الديزل"},
+    {"day": "الأحد", "date": "اليوم 2", "priceIndex": 2015000, "fluctuation": "-0.2%", "marketActivity": "Medium", "notes": "استقرار في حركة البيع بين الخواص"},
+    {"day": "الإثنين", "date": "اليوم 3", "priceIndex": 2010000, "fluctuation": "-0.3%", "marketActivity": "Medium", "notes": "عروض عبر المنصات الرقمية وتفاوض مرن"},
+    {"day": "الثلاثاء (سطيف)", "date": "اليوم 4", "priceIndex": 1985000, "fluctuation": "-1.2%", "marketActivity": "Peak", "notes": "سوق عين أرنات يسجل أسعاراً تنافسية ومرونة بالتفاوض"},
+    {"day": "الأربعاء (شلغوم العيد)", "date": "اليوم 5", "priceIndex": 1990000, "fluctuation": "+0.3%", "marketActivity": "High", "notes": "إقبال على السيارات النفعية والاقتصادية"},
+    {"day": "الخميس (باتنة)", "date": "اليوم 6", "priceIndex": 1980000, "fluctuation": "-0.5%", "marketActivity": "High", "notes": "أسعار منخفضة للشاحنات الصغيرة والسيارات النظيفة"},
+    {"day": "الجمعة", "date": "اليوم 7", "priceIndex": 1980000, "fluctuation": "0.0%", "marketActivity": "Low", "notes": "فترة تداول هادئة وتثبيت للأسعار"}
+  ],
+  "forecasts": {
+    "nextWeek": {
+      "trend": "Stable" | "Falling" | "Rising",
+      "expectedChangePercent": "-0.5% إلى -1.5%",
+      "expectedPrice": 1980000,
+      "summary": "استقرار مع ميل طفيف للتراجع بسبب توفر عروض متنوعة في أسواق نهاية الأسبوع.",
+      "keyDrivers": ["تواصل عروض أسواق السبت والثلاثاء", "مرونة البائعين في التفاوض لإنهاء الصفقات"]
+    },
+    "nextMonth": {
+      "trend": "Falling" | "Stable" | "Rising",
+      "expectedChangePercent": "-2.0% إلى -4.0%",
+      "expectedPrice": 1940000,
+      "summary": "تراجع ملحوظ في أسعار السيارات المستعملة بالتزامن مع تسليم دفعات جديدة من سيارات التجميع المحلي والوكلاء.",
+      "keyDrivers": ["تسليم كوطات جديدة من سيارات فيات وشيري", "تخوف المضاربين من ركود المعروض"]
+    },
+    "upcomingMonths": {
+      "timeframe": "خلال 3 إلى 6 أشهر القادمة",
+      "trend": "Falling" | "Stable" | "Rising",
+      "expectedChangePercent": "-5.0% إلى -8.0%",
+      "expectedPrice": 1880000,
+      "summary": "تصحيح تدريجي للأسعار نحو القيمة العادلة الحقيقية مع اتساع رقعة المعروض الجديد واستقرار السوق.",
+      "keyDrivers": ["زيادة وتيرة إنتاج مصنع وهران", "فتح استيراد علامات إضافية بأسعار منافسة"]
+    }
+  },
+  "forecastTrajectoryData": [
+    {"name": "قبل 3 أشهر", "price": 2080000, "type": "past"},
+    {"name": "الشهر الماضي", "price": 2030000, "type": "past"},
+    {"name": "السعر الحالي", "price": 2000000, "type": "current"},
+    {"name": "الأسبوع القادم", "price": 1980000, "type": "forecast", "minExpected": 1960000, "maxExpected": 2000000},
+    {"name": "الشهر القادم", "price": 1940000, "type": "forecast", "minExpected": 1900000, "maxExpected": 1970000},
+    {"name": "خلال 3 أشهر", "price": 1880000, "type": "forecast", "minExpected": 1830000, "maxExpected": 1920000},
+    {"name": "خلال 6 أشهر", "price": 1820000, "type": "forecast", "minExpected": 1750000, "maxExpected": 1880000}
+  ],
+  "marketNewsRadar": {
+    "importAndLaws": {
+      "title": "قوانين الاستيراد وحصص الوكلاء المعتمدين",
+      "status": "تفعيل مستمر وتسهيل الإجراءات",
+      "impact": "تخفيف الضغط على سوق المستعمل وزيادة الخيارات",
+      "details": "استمرار وتيرة استيراد السيارات أقل من 3 سنوات وتوسيع كوطات الوكلاء الرسميين للعلامات الآسيوية والأوروبية."
+    },
+    "factoriesAndLocalAssembly": {
+      "title": "مشاريع المصانع والتصنيع المحلي (فيات، شيري، جيلي)",
+      "status": "رفع الطاقة الإنتاجية",
+      "impact": "كبح ارتفاع أسعار المستعمل بفضل بدائل جديدة بأسعار مقننة",
+      "details": "مصنع فيات بطفراوي يواصل تسليم النماذج السياحية والنفعية، واستعداد مصانع شيري وجيلي لبدء التوزيع الفعلي."
+    },
+    "socialMediaSentiment": {
+      "title": "نبض منصات التواصل الاجتماعي (فيسبوك، تيك توك)",
+      "sentiment": "حذر وترقب وميل للتفاوض",
+      "buzzTopic": "مقارنة أسعار المستعمل المرتفعة مع تكلفة اقتناء سيارة جديدة بضمان الصانع",
+      "buyerAttitude": "المشتري الجزائري يرفض الأسعار التضخمية ويشترط الفحص بالسكانير وشهادة خلو الهيكل من الصباغة."
+    },
+    "weeklyMarketsInsights": {
+      "title": "تقرير الأسواق الأسبوعية المباشرة (تيجلابين، عين أرنات، باتنة)",
+      "highlights": "سوق عين أرنات بسطيف يقود حركة التصحيح السعري بمرونة تصل 10 إلى 20 مليون في التفاوض، بينما يسجل سوق تيجلابين طلباً مرتفعاً على سيارات الديزل الاقتصادية."
+    }
+  },
   "marketStatus": "Rising" | "Stable" | "Falling",
   "fairPrice": 2000000,
   "fairPriceMin": 1850000,
   "fairPriceMax": 2150000,
   "nationalAvgPrice": 1980000,
-  "fairPriceDefinition": "السعر العادل هو القيمة السوقية الحقيقية التي تتوازن فيها حالة السيارة (الكيلومتراج، الهيكل، الصباغة) مع العرض والطلب الحقيقي في الجزائر بدون مضاربة أو تبخيس.",
+  "fairPriceDefinition": "السعر العادل هو القيمة السوقية الحقيقية المتوازنة لحالة السيارة (الكيلومتراج، الهيكل، الصباغة) مع واقع العرض والطلب في مختلف ولايات الجزائر دون مضاربة.",
   "supplyDemand": "High" | "Medium" | "Low",
   "avgSellingTime": "12",
   "similarListings": 15,
   "regionalComparison": [
-    {"region": "الجزائر العاصمة", "price": 2050000, "diffText": "+3.5% عن المعدل"},
-    {"region": "سطيف (سوق عين أرنات)", "price": 1940000, "diffText": "-2.0% سعر تنافسي"},
-    {"region": "وهران", "price": 2000000, "diffText": "مطابق للمعدل"},
-    {"region": "قسنطينة", "price": 1970000, "diffText": "-0.5% مقبول جداً"},
-    {"region": "باتنة", "price": 1920000, "diffText": "-3.0% مناسب للبيع"}
+    {"region": "الجزائر العاصمة", "price": 2050000, "diffText": "+2.5% طلب مستقر"},
+    {"region": "سطيف (سوق عين أرنات)", "price": 1940000, "diffText": "-3.0% سعر تنافسي مرن"},
+    {"region": "وهران", "price": 2000000, "diffText": "مطابق للمعدل الوطني"},
+    {"region": "قسنطينة", "price": 1970000, "diffText": "-1.5% تداول نشط"},
+    {"region": "باتنة", "price": 1930000, "diffText": "-3.5% أنسب للشراء"}
   ],
-  "recommendation": "Negotiate",
-  "bestTimeToBuy": "أسعار هذا الموديل مستقرة حالياً، التفاوض في أسواق سطيف وباتنة يمنحك حسماً أفضل.",
-  "explanation": "السعر المطلوب قاطوعي وقريب من المعدل الوطني. ننصح بالتفاوض على السعر العادل بناء على حالة المعاودة والكيلومتراج.",
+  "recommendation": "Negotiate" | "Buy Now" | "Wait" | "Avoid",
+  "bestTimeToBuy": "التفاوض المباشر في أسواق سطيف وعين أرنات يتيح تحقيق حسم معتبر.",
+  "explanation": "التحليل الإجمالي لواقع السوق بناء على معطيات الإعلان وتدفقات العرض والطلب بالجزائر.",
   "priceFactors": [
-    {"factor": "سنة التصنيع والكيلومتراج", "impact": "محدد أولي للأساس", "value": "معدل 15,000 كم/سنة"},
-    {"factor": "الطلاء والصباغة (معاودة)", "impact": "تأثير 5 إلى 15 مليون سنتيم", "value": "السيارة النظيفة بدون صباغة تحافظ على سعرها العادل"},
-    {"factor": "فارق الولايات (سطيف والعاصمة)", "impact": "تأثير بين 2% إلى 5%", "value": "سوق سطيف يميل لتقديم أسعار أكثر مرونة من العاصمة"}
+    {"factor": "سنة التصنيع والكيلومتراج الفعلي", "impact": "المحدد الأساسي", "value": "المعدل الطبيعي 15,000 إلى 20,000 كم/سنة"},
+    {"factor": "سلامة الهيكل والصباغة (معاودة)", "impact": "فارق 5 إلى 20 مليون سنتيم", "value": "السيارة خالية الصباغة تحافظ على أصل السعر العادل"},
+    {"factor": "الفارق الإقليمي (سطيف مقابل العاصمة)", "impact": "تأثير 3% إلى 6%", "value": "سوق سطيف يقدم خيارات أوسع للتفاوض النقدي"}
   ]
 }
-ملاحظة: المبالغ تكون بالدينار الجزائري (دج).
-تنبيه صارم: الأسعار الحالية في الجزائر مرتفعة (مثلاً السيارات المستعملة تتراوح بين 120 مليون و300 مليون سنتيم حسب الفئة). تقييماتك للمجال السعري يجب أن تعتمد الواقع الحالي للسوق الجزائري كمعيار طبيعي.`;
 
-      let textContent = adDetails.title ? `معلومات الإعلان الحالي:
+تنبيه: جميع المبالغ بالدينار الجزائري (دج). اجعل تحليلك يعكس النبض الحقيقي لواقع 2026 في الجزائر.`;
+
+      let textContent = adDetails.title ? `معلومات الإعلان المراد تحليله:
 العنوان: ${adDetails.title || 'غير متوفر'}
-السعر: ${adDetails.price ? adDetails.price + ' دج' : 'غير متوفر'}
-سوموني (أعلى عرض): ${adDetails.samouni ? adDetails.samouni + ' دج' : 'غير متوفر'}
+السعر المطلوب: ${adDetails.price ? adDetails.price + ' دج' : 'غير متوفر'}
+أعلى سومة (سوموني): ${adDetails.samouni ? adDetails.samouni + ' دج' : 'غير متوفر'}
 الولاية: ${adDetails.wilaya || 'غير متوفر'}
-الماركة: ${adDetails.brand || 'غير متوفر'}
+الماركة والموديل: ${adDetails.brand || 'غير متوفر'}
 سنة الصنع: ${adDetails.year || 'غير متوفر'}
-المسافة المقطوعة: ${adDetails.mileage ? adDetails.mileage + ' كم' : 'غير متوفر'}
+الكيلومتراج: ${adDetails.mileage ? adDetails.mileage + ' كم' : 'غير متوفر'}
 
-بيانات السوق المتاحة (سيارات مشابهة):
-${JSON.stringify(marketData || [])}` : `طلب تحليل عام للسوق الجزائري للسيارات، يرجى تقديم نظرة عامة عن الأسعار، أكثر السيارات مبيعاً والتوجه الحالي للسوق.
+بيانات السوق المتاحة (سيارات مشابهة معروضة حالياً):
+${JSON.stringify(marketData || [])}` : `طلب تحليل عام وشامل لسوق السيارات في الجزائر:
+توقعات الأسعار للأسبوع القادم، الشهر القادم والأشهر القادمة بناء على قوانين الاستيراد، مشاريع المصانع (فيات، شيري، جيلي)، ونبض السوشيال ميديا وأسواق السيارات الأسبوعية.
 بيانات السوق الحالية:
 ${JSON.stringify(marketData || [])}`;
 
       // Try keys randomly or sequentially until one succeeds
       const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
       let isRateLimited = false;
       for (let i = 0; i < shuffledKeys.length; i++) {
@@ -364,7 +446,7 @@ ${JSON.stringify(marketData || [])}`;
                 contents: textContent,
                 config: {
                   systemInstruction: systemInstruction,
-                  temperature: 0.5,
+                  temperature: 0.4,
                   tools: [{ googleSearch: {} }]
                 },
               });
@@ -374,20 +456,19 @@ ${JSON.stringify(marketData || [])}`;
                 contents: textContent,
                 config: {
                   systemInstruction: systemInstruction,
-                  temperature: 0.5,
+                  temperature: 0.4,
                 },
               });
             }
 
             let responseText = response.text || response.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
             if (!responseText) {
-              // Retry without search tool if text was empty
               const fallbackRes = await ai.models.generateContent({
                 model: modelName,
                 contents: textContent,
                 config: {
                   systemInstruction: systemInstruction,
-                  temperature: 0.5,
+                  temperature: 0.4,
                 },
               });
               responseText = fallbackRes.text || fallbackRes.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
@@ -404,7 +485,8 @@ ${JSON.stringify(marketData || [])}`;
             if (!responseText) throw new Error("Empty response");
             
             try {
-              return res.json(JSON.parse(responseText));
+              const parsed = JSON.parse(responseText);
+              return res.json(parsed);
             } catch (e) {
               throw new Error("Invalid JSON: " + responseText.substring(0, 100));
             }
