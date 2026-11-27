@@ -48,6 +48,10 @@ async function startServer() {
       .replace(/<span style="color:>\s*/gi, '<span style="color: ');
   }
 
+  // Grounding cache & 429 circuit breaker to protect free-tier Search Grounding quota
+  const groundingCache = new Map<string, { brief: string; sources: { title: string; uri: string }[]; expiresAt: number }>();
+  let groundingCooldownUntil = 0;
+
   // API Route for AI Car Assessment
   app.post("/api/gemini/assess-car", async (req, res) => {
     try {
@@ -174,7 +178,6 @@ ${userMessage}
               return res.json({ reply: replyText });
             }
           } catch (error: any) {
-            console.warn(`Retry notice for key index ${i} (${modelName}):`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
                 isRateLimited = true;
@@ -262,7 +265,6 @@ ${userMessage}
               return res.json({ reply: replyText });
             }
           } catch (error: any) {
-            console.warn(`Retry notice for key index ${i} (${modelName}) in expert-chat:`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
               isRateLimited = true;
@@ -487,6 +489,55 @@ ${userMessage}
       const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
       const modelsToTry = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
 
+      // Step 1: Real Google Search grounding with 30-min cache + 429 cooldown circuit breaker
+      const cacheKey = subjectLabel.toLowerCase();
+      const cachedGrounding = groundingCache.get(cacheKey);
+      let groundedBrief = cachedGrounding && cachedGrounding.expiresAt > Date.now() ? cachedGrounding.brief : '';
+      let sources: { title: string; uri: string }[] = cachedGrounding && cachedGrounding.expiresAt > Date.now() ? cachedGrounding.sources : [];
+
+      if (!groundedBrief && Date.now() > groundingCooldownUntil) {
+        try {
+          const groundAi = new GoogleGenAI({
+            apiKey: shuffledKeys[0],
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build',
+              }
+            }
+          });
+          const searchRes = await groundAi.models.generateContent({
+            model: "gemini-3.1-flash-lite",
+            contents: `ابحث في مواقع السيارات الجزائرية الحقيقية (Ouedkniss واد كنيس، Autobip، أسعار سوق السيارات في الجزائر 2025-2026) عن متوسط الأسعار الفعلية المعروضة حالياً لـ: ${subjectLabel}. أعطِ ملخصاً مختصراً بالأرقام بالدينار الجزائري والمليون سنتيم.`,
+            config: {
+              tools: [{ googleSearch: {} }],
+            },
+          });
+          groundedBrief = (searchRes.text || '').trim();
+          const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks;
+          if (Array.isArray(chunks)) {
+            const seenUris = new Set<string>();
+            sources = chunks
+              .map((c: any) => c?.web)
+              .filter((w: any) => w?.uri && w?.title && !seenUris.has(w.uri) && seenUris.add(w.uri))
+              .slice(0, 5)
+              .map((w: any) => ({ title: String(w.title), uri: String(w.uri) }));
+          }
+          if (groundedBrief || sources.length > 0) {
+            groundingCache.set(cacheKey, {
+              brief: groundedBrief,
+              sources,
+              expiresAt: Date.now() + 30 * 60 * 1000,
+            });
+          }
+        } catch (groundErr: any) {
+          // Put Search Grounding on 5-minute cooldown if quota/rate limit is hit, and proceed seamlessly
+          const errStr = String(groundErr?.message || groundErr?.status || '');
+          if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('Quota')) {
+            groundingCooldownUntil = Date.now() + 5 * 60 * 1000;
+          }
+        }
+      }
+
       let isRateLimited = false;
       for (let i = 0; i < shuffledKeys.length; i++) {
         for (const modelName of modelsToTry) {
@@ -499,32 +550,6 @@ ${userMessage}
                 }
               }
             });
-
-            // Step 1: Real Google Search grounding for live Algerian platform prices (Ouedkniss, Facebook DZ, souks)
-            let groundedBrief = '';
-            let sources: { title: string; uri: string }[] = [];
-            try {
-              const searchRes = await ai.models.generateContent({
-                model: modelName,
-                contents: `ابحث في مواقع السيارات الجزائرية الحقيقية (Ouedkniss واد كنيس، Autobip، أسعار سوق السيارات في الجزائر 2025-2026) عن متوسط الأسعار الفعلية المعروضة حالياً لـ: ${subjectLabel}. أعطِ ملخصاً مختصراً بالأرقام بالدينار الجزائري والمليون سنتيم.`,
-                config: {
-                  tools: [{ googleSearch: {} }],
-                  ...(modelName === "gemini-4-hydrogen" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
-                },
-              });
-              groundedBrief = (searchRes.text || '').trim();
-              const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks;
-              if (Array.isArray(chunks)) {
-                const seenUris = new Set<string>();
-                sources = chunks
-                  .map((c: any) => c?.web)
-                  .filter((w: any) => w?.uri && w?.title && !seenUris.has(w.uri) && seenUris.add(w.uri))
-                  .slice(0, 5)
-                  .map((w: any) => ({ title: String(w.title), uri: String(w.uri) }));
-              }
-            } catch (groundErr: any) {
-              console.warn(`Search grounding skipped for ${modelName}:`, groundErr?.message);
-            }
 
             // Step 2: Combine real external grounded brief + real platform posts into structured JSON
             const textContent = `${targetDesc}
@@ -562,7 +587,6 @@ ${JSON.stringify(activeItems.slice(0, 15).map((m: any) => ({ title: m.title, bra
               },
             });
           } catch (error: any) {
-            console.warn(`Retry notice for key index ${i} (${modelName}) in market-analysis:`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
                 isRateLimited = true;
@@ -707,7 +731,6 @@ ${JSON.stringify(activeItems.slice(0, 15).map((m: any) => ({ title: m.title, bra
             if (!text) throw new Error("Empty response");
             return res.json(JSON.parse(text));
           } catch (error: any) {
-            console.warn(`Retry notice for key index ${i} (${modelName}) in smart-search:`, error.message);
             lastError = error;
             if (error?.message?.includes('429') || error?.message?.includes('Quota exceeded') || error?.status === 'RESOURCE_EXHAUSTED') {
               isRateLimited = true;

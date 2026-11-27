@@ -210,6 +210,32 @@ export default async function handler(req: any, res: any) {
     const modelsToTry = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
     let isRateLimited = false;
 
+    let groundedBrief = "";
+    let sources: { title: string; uri: string }[] = [];
+    try {
+      const groundAi = new GoogleGenAI({
+        apiKey: shuffledKeys[0],
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+      });
+      const searchRes = await groundAi.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: `ابحث في مواقع السيارات الجزائرية الحقيقية (Ouedkniss واد كنيس، Autobip، أسعار سوق السيارات في الجزائر 2025-2026) عن متوسط الأسعار الفعلية المعروضة حالياً لـ: ${subjectLabel}. أعطِ ملخصاً مختصراً بالأرقام بالدينار الجزائري والمليون سنتيم.`,
+        config: { tools: [{ googleSearch: {} }] },
+      });
+      groundedBrief = (searchRes.text || "").trim();
+      const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (Array.isArray(chunks)) {
+        const seenUris = new Set<string>();
+        sources = chunks
+          .map((c: any) => c?.web)
+          .filter((w: any) => w?.uri && w?.title && !seenUris.has(w.uri) && seenUris.add(w.uri))
+          .slice(0, 5)
+          .map((w: any) => ({ title: String(w.title), uri: String(w.uri) }));
+      }
+    } catch {
+      // Silently proceed using platform data & Algerian market knowledge if grounding quota is limited
+    }
+
     for (let i = 0; i < maxTries; i++) {
       for (const modelName of modelsToTry) {
         try {
@@ -221,31 +247,6 @@ export default async function handler(req: any, res: any) {
               },
             },
           });
-
-          let groundedBrief = "";
-          let sources: { title: string; uri: string }[] = [];
-          try {
-            const searchRes = await ai.models.generateContent({
-              model: modelName,
-              contents: `ابحث في مواقع السيارات الجزائرية الحقيقية (Ouedkniss واد كنيس، Autobip، أسعار سوق السيارات في الجزائر 2025-2026) عن متوسط الأسعار الفعلية المعروضة حالياً لـ: ${subjectLabel}. أعطِ ملخصاً مختصراً بالأرقام بالدينار الجزائري والمليون سنتيم.`,
-              config: {
-                tools: [{ googleSearch: {} }],
-                ...(modelName === "gemini-4-hydrogen" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
-              },
-            });
-            groundedBrief = (searchRes.text || "").trim();
-            const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            if (Array.isArray(chunks)) {
-              const seenUris = new Set<string>();
-              sources = chunks
-                .map((c: any) => c?.web)
-                .filter((w: any) => w?.uri && w?.title && !seenUris.has(w.uri) && seenUris.add(w.uri))
-                .slice(0, 5)
-                .map((w: any) => ({ title: String(w.title), uri: String(w.uri) }));
-            }
-          } catch (groundErr: any) {
-            console.warn(`Search grounding skipped for ${modelName}:`, groundErr?.message);
-          }
 
           const textContent = `${targetDesc}
 ${statsSummary}
@@ -282,7 +283,6 @@ ${JSON.stringify(activeItems.slice(0, 15).map((m: any) => ({ title: m.title, bra
             },
           });
         } catch (error: any) {
-          console.warn(`Retry notice for key index ${i} (${modelName}):`, error.message);
           lastError = error;
           if (error?.message?.includes("429") || error?.message?.includes("Quota exceeded") || error?.status === "RESOURCE_EXHAUSTED") {
             isRateLimited = true;

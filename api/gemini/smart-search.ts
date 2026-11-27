@@ -113,17 +113,18 @@ export default async function handler(req: any, res: any) {
               systemInstruction,
               responseMimeType: "application/json",
               responseSchema,
+              ...(modelName === "gemini-4-hydrogen" ? { thinkingConfig: { thinkingLevel: "LOW" as any } } : {}),
             },
           });
           return res.status(200).json(JSON.parse((response.text || "{}").trim()));
-        } catch (error: any) {
-          console.error(`Error with key index ${i} (${modelName}):`, error.message);
+        } catch {
+          // Try next model/key seamlessly
         }
       }
     }
 
-    return res.status(500).json({ error: "حدث خطأ أثناء البحث الذكي." });
-  } catch (error: any) {
+    return res.status(429).json({ error: "عذراً، تم تجاوز الحد المسموح به للطلبات المجانية في الوقت الحالي." });
+  } catch {
     return res.status(500).json({ error: "حدث خطأ أثناء البحث الذكي." });
   }
 }
