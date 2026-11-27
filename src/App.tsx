@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { BackgroundSlider } from './components/BackgroundSlider';
 import Header from './components/Header';
@@ -22,6 +22,14 @@ import { SecurityMonitor } from './components/SecurityMonitor';
 import { securityService, SecurityEvent } from './services/securityService';
 import { ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+  }, [pathname]);
+  return null;
+}
 
 function AppContent() {
   const isWidget = new URLSearchParams(window.location.search).get('widget') === 'true';
@@ -55,6 +63,7 @@ function AppContent() {
 
   return (
     <Router>
+      <ScrollToTop />
       <BackgroundSlider />
       <div className="min-h-screen flex flex-col w-full text-white bg-transparent" dir="rtl">
         <SecurityMonitor />

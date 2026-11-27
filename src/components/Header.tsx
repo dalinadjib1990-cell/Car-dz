@@ -101,9 +101,9 @@ export default function Header() {
           <Link to="/" className="text-sm font-medium hover:text-brand-green transition-colors">الرئيسية</Link>
           <Link to="/search" className="text-sm font-medium hover:text-brand-green transition-colors">البحث</Link>
           <Link to="/verified" className="text-sm font-medium hover:text-brand-green transition-colors">سيارات موثوقة</Link>
-                    <button 
+          <button 
             onClick={() => setShowMarketAnalysis(true)}
-            className="flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 hidden lg:flex"
+            className="flex items-center gap-2 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 whitespace-nowrap"
           >
             <LineChartIcon className="w-4 h-4" />
             تحليل السوق

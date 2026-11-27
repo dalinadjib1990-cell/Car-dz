@@ -90,11 +90,10 @@ ${userMessage}`;
         });
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-4-hydrogen",
           contents: contents,
           config: {
             systemInstruction: systemInstruction,
-            temperature: 0.7,
           },
         });
 

@@ -51,6 +51,7 @@ export default function AdDetails() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
     if (!id) return;
 
     // Check local storage immediately for fast zero-delay rendering
@@ -479,48 +480,54 @@ export default function AdDetails() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-        {/* Left Column: Images and Info */}
-        <div className="lg:col-span-2 space-y-8">
-          {/* Image Gallery */}
-          <div className="space-y-4">
-            <div className="relative aspect-video rounded-[32px] overflow-hidden glass-card group cursor-zoom-in" onClick={() => setShowZoom(true)}>
-              <img src={ad.images[currentImage]} alt={ad.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20">
-                  <Search className="text-white" size={24} />
-                </div>
-              </div>
-              <div className="absolute inset-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                <button 
-                  onClick={() => setCurrentImage(prev => prev > 0 ? prev - 1 : ad.images.length - 1)}
-                  className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
-                >
-                  <ChevronRight size={24} />
-                </button>
-                <button 
-                  onClick={() => setCurrentImage(prev => prev < ad.images.length - 1 ? prev + 1 : 0)}
-                  className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
-                >
-                  <ChevronLeft size={24} />
-                </button>
-              </div>
-            </div>
-            <div className="flex gap-4 overflow-x-auto pb-2 no-scrollbar">
-              {ad.images.map((img, idx) => (
-                <button 
-                  key={idx} 
-                  onClick={() => setCurrentImage(idx)}
-                  className={cn(
-                    "w-24 h-24 rounded-2xl overflow-hidden shrink-0 border-2 transition-all",
-                    currentImage === idx ? "border-brand-green scale-105" : "border-transparent opacity-50 hover:opacity-100"
-                  )}
-                >
-                  <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
-                </button>
-              ))}
+      {/* 1. Image Gallery First */}
+      <section className="space-y-4">
+        <div className="relative aspect-video max-h-[540px] w-full rounded-[32px] overflow-hidden glass-card group cursor-zoom-in" onClick={() => setShowZoom(true)}>
+          <img src={ad.images[currentImage]} alt={ad.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20">
+              <Search className="text-white" size={24} />
             </div>
           </div>
+          <div className="absolute inset-0 flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+            <button 
+              onClick={() => setCurrentImage(prev => prev > 0 ? prev - 1 : ad.images.length - 1)}
+              className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
+            >
+              <ChevronRight size={24} />
+            </button>
+            <button 
+              onClick={() => setCurrentImage(prev => prev < ad.images.length - 1 ? prev + 1 : 0)}
+              className="w-12 h-12 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-brand-green transition-colors"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          </div>
+          <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-white/10 tabular-nums">
+            {currentImage + 1} / {ad.images.length}
+          </div>
+        </div>
+        {ad.images.length > 1 && (
+          <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+            {ad.images.map((img, idx) => (
+              <button 
+                key={idx} 
+                onClick={() => setCurrentImage(idx)}
+                className={cn(
+                  "w-24 h-20 rounded-2xl overflow-hidden shrink-0 border-2 transition-all",
+                  currentImage === idx ? "border-brand-green scale-105" : "border-transparent opacity-55 hover:opacity-100"
+                )}
+              >
+                <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        {/* 2. Vehicle Info & Technical Condition */}
+        <div className="lg:col-span-2 space-y-8">
 
           {/* Ad Details */}
           <div className={cn(
@@ -820,69 +827,11 @@ export default function AdDetails() {
               </div>
             )}
           </div>
-
-          {/* Comments Section */}
-          <div className="glass-card p-8 space-y-8">
-            <h3 className="text-xl font-bold">التعليقات ({comments.length})</h3>
-            
-            <form onSubmit={handleAddComment} className="flex gap-4">
-              <input 
-                type="text" 
-                placeholder="اكتب تعليقك هنا..." 
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                className="input-field flex-1"
-              />
-              <button type="submit" className="btn-primary !py-2">إرسال</button>
-            </form>
-
-            <div className="space-y-6">
-              {comments.map(comment => (
-                <div key={comment.id} className="flex gap-4 group">
-                  <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0">
-                    <User size={20} className="text-white/40" />
-                  </div>
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm">{comment.userName}</span>
-                        <span className="text-[10px] text-white/20">{comment.createdAt?.seconds ? new Date(comment.createdAt.seconds * 1000).toLocaleDateString() : ''}</span>
-                        {comment.edited && !comment.deleted && <span className="text-[8px] text-white/20">(معدل)</span>}
-                      </div>
-                      {user?.uid === comment.userId && !comment.deleted && (
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditingCommentId(comment.id); setEditCommentText(comment.text); }} className="text-white/20 hover:text-white"><Edit2 size={12} /></button>
-                          <button onClick={() => handleDeleteComment(comment.id)} className="text-white/20 hover:text-red-500"><Trash2 size={12} /></button>
-                        </div>
-                      )}
-                    </div>
-                    {editingCommentId === comment.id ? (
-                      <div className="space-y-2 mt-2">
-                        <input 
-                          type="text" 
-                          value={editCommentText} 
-                          onChange={(e) => setEditCommentText(e.target.value)}
-                          className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm outline-none"
-                          autoFocus
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => setEditingCommentId(null)} className="text-xs text-white/40">إلغاء</button>
-                          <button onClick={() => handleEditComment(comment.id)} className="text-xs text-brand-green font-bold">حفظ</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className={cn("text-sm text-white/60", comment.deleted && "italic text-white/20")}>{comment.text}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
-        {/* Right Column: Seller Info and Actions */}
+        {/* 3. Seller Contact & AI Expert & Market Analysis */}
         <div className="space-y-6">
-          <div className="glass-card p-8 space-y-8 sticky top-28">
+          <div className="glass-card p-8 space-y-8 lg:sticky lg:top-28">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl bg-brand-green/10 flex items-center justify-center border border-brand-green/20">
                 <User size={32} className="text-brand-green" />
@@ -959,10 +908,17 @@ export default function AdDetails() {
               <button 
                 onClick={handleAIAssessment}
                 disabled={assessingCar}
-                className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-3 hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] disabled:opacity-50 disabled:pointer-events-none"
+                className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] disabled:opacity-50 disabled:pointer-events-none"
               >
                 {assessingCar ? <Loader2 size={20} className="animate-spin" /> : <Bot size={20} />}
                 تقييم الخبير الآلي للإعلان
+              </button>
+              <button
+                onClick={() => setShowMarketAnalysis(true)}
+                className="w-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold py-3.5 rounded-xl flex items-center justify-center gap-3 transition-all"
+              >
+                <LineChartIcon size={20} />
+                تحليل السوق وتوقعات السعر
               </button>
             </div>
 
@@ -988,6 +944,63 @@ export default function AdDetails() {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* 4. Comments Section */}
+      <div className="glass-card p-8 space-y-8">
+        <h3 className="text-xl font-bold">التعليقات ({comments.length})</h3>
+        
+        <form onSubmit={handleAddComment} className="flex gap-4">
+          <input 
+            type="text" 
+            placeholder="اكتب تعليقك هنا..." 
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            className="input-field flex-1"
+          />
+          <button type="submit" className="btn-primary !py-2">إرسال</button>
+        </form>
+
+        <div className="space-y-6">
+          {comments.map(comment => (
+            <div key={comment.id} className="flex gap-4 group">
+              <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                <User size={20} className="text-white/40" />
+              </div>
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm">{comment.userName}</span>
+                    <span className="text-[10px] text-white/20">{comment.createdAt?.seconds ? new Date(comment.createdAt.seconds * 1000).toLocaleDateString() : ''}</span>
+                    {comment.edited && !comment.deleted && <span className="text-[8px] text-white/20">(معدل)</span>}
+                  </div>
+                  {user?.uid === comment.userId && !comment.deleted && (
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => { setEditingCommentId(comment.id); setEditCommentText(comment.text); }} className="text-white/20 hover:text-white"><Edit2 size={12} /></button>
+                      <button onClick={() => handleDeleteComment(comment.id)} className="text-white/20 hover:text-red-500"><Trash2 size={12} /></button>
+                    </div>
+                  )}
+                </div>
+                {editingCommentId === comment.id ? (
+                  <div className="space-y-2 mt-2">
+                    <input 
+                      type="text" 
+                      value={editCommentText} 
+                      onChange={(e) => setEditCommentText(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 rounded-lg p-2 text-sm outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setEditingCommentId(null)} className="text-xs text-white/40">إلغاء</button>
+                      <button onClick={() => handleEditComment(comment.id)} className="text-xs text-brand-green font-bold">حفظ</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className={cn("text-sm text-white/60", comment.deleted && "italic text-white/20")}>{comment.text}</p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

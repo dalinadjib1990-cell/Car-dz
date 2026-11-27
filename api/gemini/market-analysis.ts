@@ -1,6 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
-export const maxDuration = 60; // Increase Vercel timeout to 60s
+export const maxDuration = 60;
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
@@ -9,75 +9,206 @@ export default async function handler(req: any, res: any) {
 
   try {
     let keys: string[] = [];
-    
-    // Check comma-separated lists
-    const keysString = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEYS || process.env.VITE_GEMINI_API_KEY || "";
+    const keysString =
+      process.env.GEMINI_API_KEYS ||
+      process.env.GEMINI_API_KEY ||
+      process.env.VITE_GEMINI_API_KEYS ||
+      process.env.VITE_GEMINI_API_KEY ||
+      "";
     if (keysString) {
-      keys = keys.concat(keysString.split(',').map(k => k.trim()).filter(k => k.length > 0));
+      keys = keys.concat(keysString.split(",").map((k) => k.trim()).filter((k) => k.length > 0));
     }
 
-    // Check individual variables like GEMINI_API_KEY_1
     for (const [key, value] of Object.entries(process.env)) {
-      if (key.startsWith('GEMINI_API_KEY_') && typeof value === 'string') {
+      if (key.startsWith("GEMINI_API_KEY_") && typeof value === "string") {
         keys.push(value.trim());
       }
     }
 
-    // Remove duplicates
-    keys = [...new Set(keys)].filter(k => k.length > 0);
-    
+    keys = [...new Set(keys)].filter((k) => k.length > 0);
     if (keys.length === 0) {
       return res.status(500).json({ error: "لم يتم العثور على مفاتيح API." });
     }
 
-    let lastError = null;
-    const { adDetails, marketData } = req.body;
-    
-    const systemInstruction = `أنت خبير جزائري محترف في تحليل سوق السيارات (Market Auto DZ).
-      مهمتك هي تحليل الإعلان المقدم ومقارنته بالبيانات المتوفرة في السوق لتوفير رؤية شاملة.
-      يجب أن ترد بصيغة JSON فقط، بدون أي نصوص إضافية، وفقاً للهيكل التالي:
-      {
-        "trendData": [
-          {"name": "الشهر الماضي", "price": 1200000},
-          {"name": "الأسبوع الماضي", "price": 1150000},
-          {"name": "الآن", "price": 1100000}
-        ],
-        "marketStatus": "Rising" | "Stable" | "Falling",
-        "fairPrice": 1100000,
-        "supplyDemand": "High" | "Medium" | "Low",
-        "avgSellingTime": "14",
-        "similarListings": 12,
-        "regionalComparison": [
-          {"region": "العاصمة", "price": 1150000},
-          {"region": "وهران", "price": 1100000},
-          {"region": "سطيف", "price": 1050000}
-        ],
-        "recommendation": "Buy Now" | "Wait" | "Negotiate" | "Avoid",
-        "bestTimeToBuy": "نصيحة قصيرة جداً، مثلاً: بداية الشتاء أو الآن لأن الأسعار منخفضة",
-        "explanation": "شرح قصير ومقنع بالدارجة الجزائرية لسبب هذا التوصية بناءً على المعطيات."
+    let lastError: any = null;
+    const { adDetails, marketData, focusBrand, searchQuery, totalPlatformAds } = req.body;
+
+    const marketItems = Array.isArray(marketData) ? marketData : [];
+    const activeItems = marketItems.filter((m: any) => m?.status !== "sold");
+    const numericPrices = activeItems
+      .map((m: any) => Number(m?.price))
+      .filter((p: number) => !isNaN(p) && p > 50000);
+
+    const sortedPrices = [...numericPrices].sort((a, b) => a - b);
+    const computedAvg =
+      sortedPrices.length > 0
+        ? Math.round(sortedPrices.reduce((a, b) => a + b, 0) / sortedPrices.length)
+        : 0;
+    const computedMedian =
+      sortedPrices.length > 0 ? sortedPrices[Math.floor(sortedPrices.length / 2)] : 0;
+    const computedMin = sortedPrices.length > 0 ? sortedPrices[0] : 0;
+    const computedMax = sortedPrices.length > 0 ? sortedPrices[sortedPrices.length - 1] : 0;
+
+    const wilayaBuckets: Record<string, number[]> = {};
+    activeItems.forEach((m: any) => {
+      const p = Number(m?.price);
+      if (m?.wilaya && !isNaN(p) && p > 50000) {
+        if (!wilayaBuckets[m.wilaya]) wilayaBuckets[m.wilaya] = [];
+        wilayaBuckets[m.wilaya].push(p);
       }
-      ملاحظة: السعر في trendData، fairPrice، و regionalComparison يجب أن يكون بالدينار الجزائري (دج).
-      أنت متصل بالإنترنت الآن! استخدم أداة البحث في جوجل (googleSearch tool) للبحث في المواقع الجزائرية لمعرفة أحدث الأسعار لسيارات مماثلة في السوق الحقيقي وتوفير بيانات دقيقة ومحدثة اليوم.
-      
-      إذا لم تتوفر لديك بيانات حقيقية كافية، استخدم خبرتك في السوق الجزائري لتقدير هذه الأرقام بشكل منطقي ومقنع. **تنبيه صارم**: الأسعار في الجزائر مرتفعة بشكل جنوني (مثلاً كليو كومبيس 2007 يتراوح سعرها بين 100 و 140 مليون سنتيم). إياك أن تصنف هذه الأسعار على أنها "غير منطقية" أو "خيالية"! هذا هو الواقع الحالي للسوق (Mise à jour). تقييمات للمجال السعري يجب أن تتبنى هذه الأسعار المتضخمة كمعيار طبيعي وعادي جداً.`;
+    });
+    const wilayaStats = Object.entries(wilayaBuckets)
+      .map(([wilaya, prices]) => ({
+        wilaya,
+        count: prices.length,
+        avgPrice: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
 
-    let textContent = adDetails?.title ? `معلومات الإعلان الحالي:
-العنوان: ${adDetails.title || 'غير متوفر'}
-السعر: ${adDetails.price ? adDetails.price + ' دج' : 'غير متوفر'}
-سوموني (أعلى عرض): ${adDetails.samouni ? adDetails.samouni + ' دج' : 'غير متوفر'}
-الولاية: ${adDetails.wilaya || 'غير متوفر'}
-الماركة: ${adDetails.brand || 'غير متوفر'}
-سنة الصنع: ${adDetails.year || 'غير متوفر'}
-المسافة المقطوعة: ${adDetails.mileage ? adDetails.mileage + ' كم' : 'غير متوفر'}
+    const matchingCount = activeItems.length;
+    const platformWeightPercent =
+      matchingCount === 0 ? 0 : Math.min(85, Math.max(15, Math.round((matchingCount / 25) * 85)));
 
-بيانات السوق المتاحة (سيارات مشابهة):
-${JSON.stringify(marketData || [])}` : `طلب تحليل عام للسوق الجزائري للسيارات، يرجى تقديم نظرة عامة عن الأسعار، أكثر السيارات مبيعاً والتوجه الحالي للسوق.
-بيانات السوق الحالية:
-${JSON.stringify(marketData || [])}`;
+    const subjectLabel = adDetails?.title
+      ? `${adDetails.brand || ""} ${adDetails.model || ""} ${adDetails.year || ""} (${adDetails.title})`.trim()
+      : [focusBrand, searchQuery].filter(Boolean).join(" ").trim() ||
+        "سوق السيارات المستعملة في الجزائر (رينو، هيونداي، فولكسفاغن، داسيا، بيجو)";
+
+    const systemInstruction = `أنت محلل اقتصادي جزائري دقيق ومتخصص في سوق السيارات بالجزائر (Market Auto DZ).
+مهمتك تقديم تحليل سوقي دقيق ومفهوم جداً للشخص العادي يجمع بين:
+- المعطيات الواقعية الحقيقية من المنصات والأسواق الجزائرية (Ouedkniss واد كنيس، Facebook Marketplace DZ، أسواق تيجلابين وعين أرنات سطيف)
+- والمعطيات الفعلية المسجلة في منشورات هذه المنصة (وزن بيانات المنصة الحالية: ${platformWeightPercent}% بناءً على ${matchingCount} منشور نشط).`;
+
+    const targetDesc = adDetails?.title
+      ? `معلومات الإعلان الحالي:
+العنوان: ${adDetails.title}
+الماركة والموديل: ${adDetails.brand || ""} ${adDetails.model || ""}
+السعر المطلوب: ${adDetails.price ? adDetails.price + " دج" : "غير متوفر"}
+الولاية: ${adDetails.wilaya || "غير متوفر"}
+سنة الصنع: ${adDetails.year || "غير متوفر"}
+المسافة: ${adDetails.mileage ? adDetails.mileage + " كم" : "غير متوفر"}
+المحرك والطاقة: ${adDetails.engine || ""} ${adDetails.fuelType || ""}`
+      : `الموضوع المطلوب تحليله في السوق الجزائري: ${subjectLabel}`;
+
+    const statsSummary =
+      numericPrices.length > 0
+        ? `إحصائيات حقيقية من إعلانات المنصة (${numericPrices.length} منشور مطابق): المتوسط ${computedAvg} دج، الوسيط ${computedMedian} دج، الأدنى ${computedMin} دج، الأعلى ${computedMax} دج. إحصائيات الولايات: ${JSON.stringify(wilayaStats)}`
+        : `لا توجد إعلانات مطابقة كافية بعد في المنصة (0 منشور مطابق لهذا التحديد)، اعتمد على الأسعار الحقيقية في المنصات والأسواق الجزائرية الآن.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        dailyMarket: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              label: { type: Type.STRING },
+              avgPrice: { type: Type.NUMBER },
+              fairPrice: { type: Type.NUMBER },
+              demandScore: { type: Type.NUMBER },
+              note: { type: Type.STRING },
+            },
+            required: ["label", "avgPrice", "fairPrice", "demandScore", "note"],
+          },
+        },
+        dailySummary: { type: Type.STRING },
+        weeklyMarket: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              label: { type: Type.STRING },
+              marketPrice: { type: Type.NUMBER },
+              fairPrice: { type: Type.NUMBER },
+              activityScore: { type: Type.NUMBER },
+              note: { type: Type.STRING },
+            },
+            required: ["label", "marketPrice", "fairPrice", "activityScore", "note"],
+          },
+        },
+        weeklySummary: { type: Type.STRING },
+        monthlyForecast: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              label: { type: Type.STRING },
+              actualPrice: { type: Type.NUMBER },
+              forecastPrice: { type: Type.NUMBER },
+              optimisticPrice: { type: Type.NUMBER },
+              pessimisticPrice: { type: Type.NUMBER },
+              isForecast: { type: Type.BOOLEAN },
+              trendColor: { type: Type.STRING },
+              simpleReason: { type: Type.STRING },
+            },
+            required: ["label", "isForecast", "trendColor", "simpleReason"],
+          },
+        },
+        monthlySummary: { type: Type.STRING },
+        simpleCitizenGuide: {
+          type: Type.OBJECT,
+          properties: {
+            verdictTitle: { type: Type.STRING },
+            simpleMeaning: { type: Type.STRING },
+            buyerAdvice: { type: Type.STRING },
+            sellerAdvice: { type: Type.STRING },
+            expectedChangeText: { type: Type.STRING },
+          },
+          required: ["verdictTitle", "simpleMeaning", "buyerAdvice", "sellerAdvice", "expectedChangeText"],
+        },
+        marketStatus: { type: Type.STRING },
+        fairPrice: { type: Type.NUMBER },
+        fairPriceMin: { type: Type.NUMBER },
+        fairPriceMax: { type: Type.NUMBER },
+        nationalAvgPrice: { type: Type.NUMBER },
+        fairPriceDefinition: { type: Type.STRING },
+        supplyDemand: { type: Type.STRING },
+        avgSellingTime: { type: Type.STRING },
+        similarListings: { type: Type.NUMBER },
+        regionalComparison: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              region: { type: Type.STRING },
+              price: { type: Type.NUMBER },
+              diffText: { type: Type.STRING },
+            },
+            required: ["region", "price", "diffText"],
+          },
+        },
+        recommendation: { type: Type.STRING },
+        bestTimeToBuy: { type: Type.STRING },
+        explanation: { type: Type.STRING },
+        priceFactors: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              factor: { type: Type.STRING },
+              impact: { type: Type.STRING },
+              value: { type: Type.STRING },
+            },
+            required: ["factor", "impact", "value"],
+          },
+        },
+      },
+      required: [
+        "dailyMarket", "dailySummary", "weeklyMarket", "weeklySummary",
+        "monthlyForecast", "monthlySummary", "simpleCitizenGuide",
+        "marketStatus", "fairPrice", "fairPriceMin", "fairPriceMax",
+        "nationalAvgPrice", "fairPriceDefinition", "supplyDemand",
+        "avgSellingTime", "similarListings", "regionalComparison",
+        "recommendation", "bestTimeToBuy", "explanation", "priceFactors",
+      ],
+    };
 
     const shuffledKeys = [...keys].sort(() => Math.random() - 0.5);
     const maxTries = Math.min(shuffledKeys.length, 3);
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"];
+    const modelsToTry = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+    let isRateLimited = false;
 
     for (let i = 0; i < maxTries; i++) {
       for (const modelName of modelsToTry) {
@@ -86,40 +217,87 @@ ${JSON.stringify(marketData || [])}`;
             apiKey: shuffledKeys[i],
             httpOptions: {
               headers: {
-                'User-Agent': 'aistudio-build',
-              }
-            }
+                "User-Agent": "aistudio-build",
+              },
+            },
           });
+
+          let groundedBrief = "";
+          let sources: { title: string; uri: string }[] = [];
+          try {
+            const searchRes = await ai.models.generateContent({
+              model: modelName,
+              contents: `ابحث في مواقع السيارات الجزائرية الحقيقية (Ouedkniss واد كنيس، Autobip، أسعار سوق السيارات في الجزائر 2025-2026) عن متوسط الأسعار الفعلية المعروضة حالياً لـ: ${subjectLabel}. أعطِ ملخصاً مختصراً بالأرقام بالدينار الجزائري والمليون سنتيم.`,
+              config: {
+                tools: [{ googleSearch: {} }],
+                ...(modelName === "gemini-4-hydrogen" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+              },
+            });
+            groundedBrief = (searchRes.text || "").trim();
+            const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (Array.isArray(chunks)) {
+              const seenUris = new Set<string>();
+              sources = chunks
+                .map((c: any) => c?.web)
+                .filter((w: any) => w?.uri && w?.title && !seenUris.has(w.uri) && seenUris.add(w.uri))
+                .slice(0, 5)
+                .map((w: any) => ({ title: String(w.title), uri: String(w.uri) }));
+            }
+          } catch (groundErr: any) {
+            console.warn(`Search grounding skipped for ${modelName}:`, groundErr?.message);
+          }
+
+          const textContent = `${targetDesc}
+${statsSummary}
+${groundedBrief ? `نتائج البحث الحقيقي من المنصات الجزائرية الآن:\n${groundedBrief}\n` : ""}
+عينة من المنشورات الفعلية على المنصة:
+${JSON.stringify(activeItems.slice(0, 15).map((m: any) => ({ title: m.title, brand: m.brand, model: m.model, year: m.year, price: m.price, wilaya: m.wilaya, mileage: m.mileage })))}`;
 
           const response = await ai.models.generateContent({
             model: modelName,
             contents: textContent,
             config: {
-              systemInstruction: systemInstruction,
-              temperature: 0.5,
-              tools: [{ googleSearch: {} }]
+              systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema,
+              ...(modelName === "gemini-4-hydrogen" ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
             },
           });
 
-          let responseText = response.text || '';
-          const jsonMatch = responseText.match(/\{.*\}/s);
-          if (jsonMatch) {
-            responseText = jsonMatch[0];
-          } else {
-            responseText = responseText.replace(/```(json)?/g, '').trim();
-          }
+          const responseText = (response.text || "").trim();
+          if (!responseText) throw new Error("Empty response");
+          const parsed = JSON.parse(responseText);
 
-          return res.status(200).json(JSON.parse(responseText));
+          return res.status(200).json({
+            ...parsed,
+            sources,
+            platformTelemetry: {
+              totalPlatformAds: Number(totalPlatformAds) || marketItems.length,
+              matchingPlatformAds: matchingCount,
+              platformAvgPrice: computedAvg,
+              platformMinPrice: computedMin,
+              platformMaxPrice: computedMax,
+              platformWeightPercent,
+              externalWeightPercent: 100 - platformWeightPercent,
+            },
+          });
         } catch (error: any) {
-          console.error(`Error with key index ${i} using model ${modelName}:`, error.message);
+          console.warn(`Retry notice for key index ${i} (${modelName}):`, error.message);
           lastError = error;
+          if (error?.message?.includes("429") || error?.message?.includes("Quota exceeded") || error?.status === "RESOURCE_EXHAUSTED") {
+            isRateLimited = true;
+          }
         }
       }
     }
 
-    return res.status(500).json({ error: "عذراً، تم تجاوز الحد المسموح به للطلبات المجانية في الوقت الحالي." });
+    if (isRateLimited) {
+      return res.status(429).json({ error: "عذراً، تم تجاوز الحد المسموح به للطلبات المجانية في الوقت الحالي." });
+    }
+    return res.status(500).json({ error: lastError?.message || "حدث خطأ أثناء تحليل السوق." });
   } catch (error: any) {
     console.error("Final Error from Gemini:", error);
     return res.status(500).json({ error: "حدث خطأ أثناء تحليل السوق." });
   }
 }
+
